@@ -1,3 +1,105 @@
+// Range and network warning assumptions; validate every value with field recordings.
+const RANGE_CONFIG = {
+  SIREN_SPL_REF_DB: 115, // ASSUMPTION: siren SPL at REF_DIST_M; validate with recordings.
+  REF_DIST_M: 3, // ASSUMPTION: reference measurement distance in metres; validate in field.
+  TRAFFIC_NOISE_DB: 78, // ASSUMPTION: representative traffic noise; measure by time/location.
+  MIN_SNR_DB: 6, // ASSUMPTION: minimum usable siren-to-noise margin; validate in field.
+  ARM_DISTANCE_M: 500 // ASSUMPTION: network warning radius; validate with deployment coverage.
+};
+
+// Direction thresholds and reference values; all are assumptions to tune with field recordings.
+const DIRECTION_CONFIG = Object.freeze({
+  APPROACH_SLOPE_DB_S: 1.5, // ASSUMPTION: minimum rising/falling level trend in dB/s.
+  APPROACH_MIN_CONF: 0.65, // ASSUMPTION: minimum R-squared for a usable loudness trend.
+  WINDOW_MS: 3000, // ASSUMPTION: loudness and Doppler trend window in milliseconds.
+  SAMPLE_INTERVAL_MS: 100, // ASSUMPTION: RMS direction sample interval in milliseconds.
+  MIN_TREND_POINTS: 8, // ASSUMPTION: samples needed before direction can be classified.
+  DOPPLER_SHIFT_HZ: 18, // ASSUMPTION: minimum shift to display supporting Doppler evidence.
+  DOPPLER_TEST_SHIFT_CENTS: 40, // ASSUMPTION: synthetic Doppler shift for simulator signals.
+  STEREO_MAX_LAG_SAMPLES: 32, // ASSUMPTION: stereo delay search limit; tune for device sample rates.
+  RECEDE_RELEASE_MS: 2000, // ASSUMPTION: continuous receding time before safe release begins.
+  RELEASE_AMBER_MS: 3000, // ASSUMPTION: demo amber clearance interval.
+  RELEASE_ALL_RED_MS: 1000, // ASSUMPTION: demo all-red clearance interval.
+  ARM_TOLERANCE_DEG: 30, // ASSUMPTION: maximum heading difference for arm matching.
+  DOPPLER_REFERENCE_RANGES: {
+    wail: { minHz: 720, maxHz: 1580 }, // ASSUMPTION: typical wail sweep range; tune with recordings.
+    yelp: { minHz: 700, maxHz: 1500 }, // ASSUMPTION: typical yelp sweep range; tune with recordings.
+    "hi-lo": { minHz: 700, maxHz: 1500 } // ASSUMPTION: hi-lo range; used only for supporting evidence.
+  }
+});
+
+// Queue-discharge model assumptions mirror app.py; verify each against field observations.
+const QUEUE_CONFIG = Object.freeze({
+  T_REACT_S: 3.5, // ASSUMPTION: driver reaction delay.
+  T_STARTUP_S: 2.0, // ASSUMPTION: start-up lost time.
+  H_S_PER_PCU: 2.0, // ASSUMPTION: nominal saturation headway, about 1800 PCU/hr/lane.
+  H_LOW_S_PER_PCU: 1.7, // ASSUMPTION: low headway estimate.
+  H_HIGH_S_PER_PCU: 2.6, // ASSUMPTION: high headway estimate.
+  PCU_UNCERTAINTY: 0.15, // ASSUMPTION: +/- PCU uncertainty.
+  GREEN_START_EARLY_BUFFER_S: 1.0, // ASSUMPTION: conservative early-start allowance.
+  // ASSUMPTION: Verify against IRC:106 table before presenting. Replace if different.
+  PCU_FACTORS: Object.freeze({ car: 1.0, two_wheeler: 0.5, heavy_vehicle: 2.2, auto_rickshaw: 1.2 }),
+  // ASSUMPTION: effective lanes for each junction approach arm; replace after field survey.
+  LANES_PER_JUNCTION_ARM: Object.freeze(Object.fromEntries(["J1", "J2", "J3", "J4"].map(id =>
+    [id, Object.freeze({ N: 2, E: 2, S: 2, W: 2 })]
+  )))
+});
+
+function calculateQueueDischarge(cars, trucks, bikes, autoRickshaws = 0, effectiveLanes = 2) {
+  const counts = { car: Math.max(0, Math.trunc(Number(cars) || 0)), two_wheeler: Math.max(0, Math.trunc(Number(bikes) || 0)),
+    heavy_vehicle: Math.max(0, Math.trunc(Number(trucks) || 0)), auto_rickshaw: Math.max(0, Math.trunc(Number(autoRickshaws) || 0)) };
+  const lanes = Math.max(Number(effectiveLanes) || 2, 1);
+  const pcuTotal = Object.entries(counts).reduce((sum, [kind, count]) => sum + count * QUEUE_CONFIG.PCU_FACTORS[kind], 0);
+  const fixedDelay = QUEUE_CONFIG.T_REACT_S + QUEUE_CONFIG.T_STARTUP_S;
+  const uncertainty = QUEUE_CONFIG.PCU_UNCERTAINTY;
+  const nominal = fixedDelay + pcuTotal * QUEUE_CONFIG.H_S_PER_PCU / lanes;
+  const low = fixedDelay + pcuTotal * (1 - uncertainty) * QUEUE_CONFIG.H_LOW_S_PER_PCU / lanes;
+  const high = fixedDelay + pcuTotal * (1 + uncertainty) * QUEUE_CONFIG.H_HIGH_S_PER_PCU / lanes;
+  const contributions = Object.fromEntries(Object.entries(counts).map(([kind, count]) =>
+    [kind, count * QUEUE_CONFIG.PCU_FACTORS[kind] * QUEUE_CONFIG.H_S_PER_PCU / lanes]
+  ));
+  return { nominal_sec: nominal, low_sec: low, high_sec: high, pcu_total: pcuTotal, effective_lanes: lanes,
+    pcu_uncertainty: uncertainty, reaction_sec: QUEUE_CONFIG.T_REACT_S, startup_sec: QUEUE_CONFIG.T_STARTUP_S,
+    class_contributions_sec: contributions };
+}
+
+function runQueueModelSelfCheck() {
+  const cases = [
+    { name: "empty queue", args: [0, 0, 0, 0, 2], expected: 5.5 },
+    { name: "10 cars, 2 lanes", args: [10, 0, 0, 0, 2], expected: 15.5 },
+    { name: "mixed queue", args: [10, 2, 4, 1, 2], expected: 23.1 }
+  ];
+  console.group("Queue discharge model self-check");
+  let allPassed = true;
+  for (const test of cases) {
+    const actual = calculateQueueDischarge(...test.args);
+    const pass = Math.abs(actual.nominal_sec - test.expected) < 0.001;
+    allPassed = allPassed && pass;
+    console[pass ? "log" : "error"](`${pass ? "PASS" : "FAIL"} ${test.name}: expected ${test.expected.toFixed(3)}s, actual ${actual.nominal_sec.toFixed(3)}s`);
+    const ordered = actual.low_sec <= actual.nominal_sec && actual.nominal_sec <= actual.high_sec;
+    allPassed = allPassed && ordered;
+    console[ordered ? "log" : "error"](`${ordered ? "PASS" : "FAIL"} ${test.name} bounds: expected LOW <= nominal <= HIGH, actual ${actual.low_sec.toFixed(3)} <= ${actual.nominal_sec.toFixed(3)} <= ${actual.high_sec.toFixed(3)}`);
+  }
+  const label = document.querySelector("#tflush-math-box .math-title")?.textContent || "";
+  const labelPassed = label.includes("QUEUE DISCHARGE (saturation flow)");
+  allPassed = allPassed && labelPassed;
+  console[labelPassed ? "log" : "error"](`${labelPassed ? "PASS" : "FAIL"} renamed UI label: expected QUEUE DISCHARGE (saturation flow), actual ${label || "missing"}`);
+  console.groupEnd();
+  return allPassed;
+}
+
+window.runQueueModelSelfCheck = runQueueModelSelfCheck;
+
+let latestVerifiedVehicleReports = {};
+
+// Approach bearings are provisional compass headings toward each junction; field-check each arm.
+const JUNCTION_ARMS = Object.freeze({
+  J1: [{ id: "N", bearing: 0 }, { id: "E", bearing: 90 }, { id: "S", bearing: 180 }, { id: "W", bearing: 270 }],
+  J2: [{ id: "N", bearing: 10 }, { id: "E", bearing: 95 }, { id: "S", bearing: 190 }, { id: "W", bearing: 275 }],
+  J3: [{ id: "N", bearing: 350 }, { id: "E", bearing: 85 }, { id: "S", bearing: 170 }, { id: "W", bearing: 265 }],
+  J4: [{ id: "N", bearing: 5 }, { id: "E", bearing: 100 }, { id: "S", bearing: 185 }, { id: "W", bearing: 280 }]
+});
+
 // Tunable siren detector and synthetic signal settings.
 const SIREN_CONFIG = Object.freeze({
   FFT_SIZE: 4096,                         // Finer frequency resolution for the siren band.
@@ -54,8 +156,13 @@ async function api(url, options = {}) {
     headers: { "Content-Type": "application/json" },
     ...options
   });
-  if (!r.ok) throw new Error("Request failed: " + r.statusText);
-  return r.json();
+  const data = await r.json();
+  if (!r.ok) {
+    const error = new Error(data.reason || data.error || "Request failed: " + r.statusText);
+    error.data = data;
+    throw error;
+  }
+  return data;
 }
 
 function statusClass(s) {
@@ -170,6 +277,7 @@ function renderSummary(data) {
       if (j.signal_state === "PREEMPT_GREEN") sigClass = "preempt-green";
       else if (j.signal_state === "GREEN_WAVE_STANDBY") sigClass = "standby";
       else if (j.signal_state === "GREEN") sigClass = "green";
+      else if (j.signal_state === "AMBER_CLEARANCE") sigClass = "amber-clearance";
 
       return `
         <div class="junction-card glass" data-junction="${esc(j.id)}">
@@ -182,7 +290,7 @@ function renderSummary(data) {
             <span title="Queued Trucks">🚚 <b class="q-trucks">${j.trucks}</b></span>
             <span title="Queued Bikes">🛵 <b class="q-bikes">${j.bikes}</b></span>
           </div>
-          <div class="junction-flush"><small>GREENSHIELDS QUEUE-FLUSH</small> T_flush: <strong class="q-flush">${j.t_flush_sec}s</strong></div>
+          <div class="junction-flush"><small>QUEUE DISCHARGE (saturation flow)</small> T_flush: <strong class="q-flush">${j.t_flush_sec}s</strong> <small class="q-flush-range">${j.t_flush_low_sec}–${j.t_flush_high_sec}s</small></div>
         </div>
       `;
     }).join("");
@@ -190,6 +298,7 @@ function renderSummary(data) {
 
   // 4. SVG Green Wave Corridor Pulse
   const hasPreempt = (data.junctions || []).some(j => j.signal_state === "PREEMPT_GREEN") || ((m.active_green_waves || 0) > 0);
+  preemptionActive = (data.junctions || []).some(j => j.signal_state === "PREEMPT_GREEN");
   const gwEl = $("#svg-green-wave-corridor");
   if (gwEl) gwEl.classList.toggle("active", hasPreempt);
 
@@ -367,34 +476,317 @@ function initTopbarAndModals() {
 }
 
 // ==========================================
-// 3. MODULE A: GREENSHIELDS MATH & ACOUSTIC FFT
+// 3. MODULE A: QUEUE DISCHARGE MATH & ACOUSTIC FFT
 // ==========================================
 
 function updateLiveMath() {
   const cars = parseFloat($("#preempt-cars")?.value || 0);
   const trucks = parseFloat($("#preempt-trucks")?.value || 0);
   const bikes = parseFloat($("#preempt-bikes")?.value || 0);
-  const dist = parseFloat($("#preempt-dist")?.value || 0);
-  const speed = parseFloat($("#preempt-speed")?.value || 0);
+  const junctionId = $("#preempt-junction")?.value || "J2";
+  const selectedVehicle = $("#verified-vehicle")?.value || "";
+  const verifiedMetrics = latestVerifiedVehicleReports[selectedVehicle]?.[junctionId];
+  const manualEta = Number($("#preempt-dist")?.value || 0) / Math.max(Number($("#preempt-speed")?.value || 0) / 3.6, 1);
+  const eta = Number.isFinite(verifiedMetrics?.eta_s) ? verifiedMetrics.eta_s : manualEta;
+  const chosenArm = verifiedMetrics?.arm || identifyJunctionArm(junctionId, Number($("#ambulance-sim-heading")?.value || 0)) || "N";
+  const lanes = QUEUE_CONFIG.LANES_PER_JUNCTION_ARM[junctionId]?.[chosenArm] || 2;
+  const estimate = calculateQueueDischarge(cars, trucks, bikes, 0, lanes);
+  const tFlushHigh = estimate.high_sec;
+  const greenStartIn = eta - tFlushHigh;
+  const formula = `${QUEUE_CONFIG.T_REACT_S.toFixed(1)} + ${QUEUE_CONFIG.T_STARTUP_S.toFixed(1)} + (${cars}*${QUEUE_CONFIG.PCU_FACTORS.car.toFixed(1)} + ${trucks}*${QUEUE_CONFIG.PCU_FACTORS.heavy_vehicle.toFixed(1)} + ${bikes}*${QUEUE_CONFIG.PCU_FACTORS.two_wheeler.toFixed(1)} + 0*${QUEUE_CONFIG.PCU_FACTORS.auto_rickshaw.toFixed(1)}) * ${QUEUE_CONFIG.H_S_PER_PCU.toFixed(1)} / ${lanes} = ${estimate.nominal_sec.toFixed(1)} s`;
 
-  const t_flush = (3.5 + (cars * 6.5 / 6.5) + (trucks * 13.5 / 4.0) + (bikes * 3.2 / 8.0)).toFixed(1);
-  const speedMps = Math.max(speed / 3.6, 1);
-  const eta = (dist / speedMps).toFixed(1);
-
-  if ($("#calc-tflush")) $("#calc-tflush").textContent = `${t_flush}s`;
-  if ($("#calc-eta")) $("#calc-eta").textContent = `${eta}s`;
+  if ($("#queue-formula")) $("#queue-formula").textContent = formula;
+  if ($("#calc-tflush")) $("#calc-tflush").textContent = `${estimate.nominal_sec.toFixed(1)}s`;
+  if ($("#calc-tflush-range")) $("#calc-tflush-range").textContent = `${estimate.low_sec.toFixed(1)}–${estimate.high_sec.toFixed(1)}s`;
+  if ($("#calc-eta")) $("#calc-eta").textContent = `${eta.toFixed(1)}s`;
+  if ($("#calc-eta-source")) $("#calc-eta-source").textContent = Number.isFinite(verifiedMetrics?.eta_s) ? "verified position" : "manual estimate";
+  if ($("#queue-breakdown")) {
+    const parts = estimate.class_contributions_sec;
+    $("#queue-breakdown").textContent = `Reaction ${estimate.reaction_sec.toFixed(1)}s · start-up ${estimate.startup_sec.toFixed(1)}s · cars ${parts.car.toFixed(1)}s · heavy vehicles ${parts.heavy_vehicle.toFixed(1)}s · two-wheelers ${parts.two_wheeler.toFixed(1)}s · auto-rickshaws ${parts.auto_rickshaw.toFixed(1)}s · ${lanes} lanes · PCU ±${Math.round(estimate.pcu_uncertainty * 100)}%`;
+  }
 
   const marginEl = $("#calc-margin");
   if (marginEl) {
-    const diff = parseFloat(eta) - parseFloat(t_flush);
-    if (diff >= 0) {
-      marginEl.className = "margin-status safe";
-      marginEl.textContent = `Margin: +${diff.toFixed(1)}s (Clear Before Arrival)`;
-    } else {
+    if (greenStartIn < 0) {
       marginEl.className = "margin-status danger";
-      marginEl.textContent = `Margin: ${diff.toFixed(1)}s (Immediate Preempt Critical)`;
+      marginEl.textContent = "TOO LATE: queue will not clear in time";
+    } else {
+      marginEl.className = "margin-status safe";
+      marginEl.textContent = `Green start in ${greenStartIn.toFixed(1)}s using high estimate`;
     }
   }
+}
+
+function currentRangeConfig() {
+  return {
+    SIREN_SPL_REF_DB: Number($("#range-spl")?.value ?? RANGE_CONFIG.SIREN_SPL_REF_DB),
+    REF_DIST_M: Number($("#range-ref-dist")?.value ?? RANGE_CONFIG.REF_DIST_M),
+    TRAFFIC_NOISE_DB: Number($("#range-noise")?.value ?? RANGE_CONFIG.TRAFFIC_NOISE_DB),
+    MIN_SNR_DB: Number($("#range-min-snr")?.value ?? RANGE_CONFIG.MIN_SNR_DB),
+    ARM_DISTANCE_M: RANGE_CONFIG.ARM_DISTANCE_M
+  };
+}
+
+function maxMicRangeM(config = currentRangeConfig()) {
+  return config.REF_DIST_M * Math.pow(10,
+    (config.SIREN_SPL_REF_DB - config.TRAFFIC_NOISE_DB - config.MIN_SNR_DB) / 20);
+}
+
+function renderRangeEstimate() {
+  const config = currentRangeConfig();
+  const valid = config.REF_DIST_M > 0 && [config.SIREN_SPL_REF_DB, config.TRAFFIC_NOISE_DB, config.MIN_SNR_DB].every(Number.isFinite);
+  const range = valid ? maxMicRangeM(config) : 0;
+  if ($("#mic-range-result")) $("#mic-range-result").textContent = valid ? `${Math.round(range)} m` : "Invalid inputs";
+  const body = $("#range-table-body");
+  if (body) body.innerHTML = [50, 100, 150, 250, 400].map(distance => {
+    const spl = config.SIREN_SPL_REF_DB - 20 * Math.log10(distance / config.REF_DIST_M);
+    const snr = spl - config.TRAFFIC_NOISE_DB;
+    return `<tr><td>${distance} m</td><td>${spl.toFixed(1)} dB</td><td>${snr.toFixed(1)} dB</td><td>${snr >= config.MIN_SNR_DB ? "Yes" : "No"}</td></tr>`;
+  }).join("");
+  renderApproachSimulator();
+}
+
+let approachDistanceM = 600;
+let approachTimer = null;
+let approachSimulationActive = false;
+let directionSelfCheckRunning = false;
+let preemptionActive = false;
+let preemptionRequestPending = false;
+let preemptionScheduled = false;
+let preemptionReleasePending = false;
+let recedingSince = 0;
+let lastDirectionSampleAt = 0;
+let rmsTrendPoints = [];
+let sirenTimeData = null;
+let directionAnalysis = { slopeDbS: 0, rSquared: 0, state: "UNKNOWN", dopplerHint: "—", dopplerOffsetHz: 0 };
+let leftChannelAnalyser = null;
+let rightChannelAnalyser = null;
+let leftChannelData = null;
+let rightChannelData = null;
+let channelSplitter = null;
+let stereoHint = "—";
+
+function identifyJunctionArm(junctionId, headingDeg) {
+  const arms = JUNCTION_ARMS[junctionId] || [];
+  const heading = ((Number(headingDeg) % 360) + 360) % 360;
+  let nearest = null;
+  arms.forEach(arm => {
+    const difference = Math.abs(((heading - arm.bearing + 540) % 360) - 180);
+    if (!nearest || difference < nearest.difference) nearest = { id: arm.id, difference };
+  });
+  return nearest && nearest.difference <= DIRECTION_CONFIG.ARM_TOLERANCE_DEG ? nearest.id : null;
+}
+
+function calculateRmsDb() {
+  if (!analyser || !sirenTimeData) return null;
+  analyser.getFloatTimeDomainData(sirenTimeData);
+  let sumSquares = 0;
+  for (const sample of sirenTimeData) sumSquares += sample * sample;
+  const rms = Math.sqrt(sumSquares / sirenTimeData.length);
+  return 20 * Math.log10(Math.max(rms, 1e-8));
+}
+
+function fitRmsTrend() {
+  const points = rmsTrendPoints;
+  if (points.length < DIRECTION_CONFIG.MIN_TREND_POINTS) {
+    return { slopeDbS: 0, rSquared: 0, state: "UNKNOWN" };
+  }
+  const origin = points[0].time;
+  const xs = points.map(point => (point.time - origin) / 1000);
+  const ys = points.map(point => point.db);
+  const meanX = xs.reduce((sum, value) => sum + value, 0) / xs.length;
+  const meanY = ys.reduce((sum, value) => sum + value, 0) / ys.length;
+  let covariance = 0, varianceX = 0, varianceY = 0;
+  for (let i = 0; i < xs.length; i++) {
+    covariance += (xs[i] - meanX) * (ys[i] - meanY);
+    varianceX += (xs[i] - meanX) ** 2;
+    varianceY += (ys[i] - meanY) ** 2;
+  }
+  const slopeDbS = varianceX ? covariance / varianceX : 0;
+  const rSquared = varianceY ? Math.max(0, Math.min(1, (covariance * covariance) / (varianceX * varianceY))) : 0;
+  const state = slopeDbS > DIRECTION_CONFIG.APPROACH_SLOPE_DB_S ? "APPROACHING" :
+    slopeDbS < -DIRECTION_CONFIG.APPROACH_SLOPE_DB_S ? "RECEDING" : "UNKNOWN";
+  return { slopeDbS, rSquared, state };
+}
+
+function getDopplerHint() {
+  const label = sirenDetector.label !== "none" ? sirenDetector.label : sirenDetector.candidateLabel;
+  const reference = DIRECTION_CONFIG.DOPPLER_REFERENCE_RANGES[label];
+  const points = sirenHistory.filter(point => point.valid && performance.now() - point.time <= DIRECTION_CONFIG.WINDOW_MS);
+  if (!reference || points.length < DIRECTION_CONFIG.MIN_TREND_POINTS) return { dopplerHint: "—", dopplerOffsetHz: 0 };
+  const low = Math.min(...points.map(point => point.frequencyHz));
+  const high = Math.max(...points.map(point => point.frequencyHz));
+  const observedMidpoint = (low + high) / 2;
+  const referenceMidpoint = (reference.minHz + reference.maxHz) / 2;
+  const offsetHz = observedMidpoint - referenceMidpoint;
+  const hint = offsetHz > DIRECTION_CONFIG.DOPPLER_SHIFT_HZ ? "Approach-like (supporting evidence)" :
+    offsetHz < -DIRECTION_CONFIG.DOPPLER_SHIFT_HZ ? "Recede-like (supporting evidence)" : "No clear shift (supporting evidence)";
+  return { dopplerHint: hint, dopplerOffsetHz: offsetHz };
+}
+
+function evaluateDirectionGate(stage = sirenDetector.state === "CONFIRMED" ? "confirmed" : "armed", checkDistance = true) {
+  const junctionId = $("#preempt-junction")?.value || "J1";
+  const headingValue = $("#ambulance-sim-heading")?.value;
+  const heading = headingValue === "" || headingValue === undefined ? NaN : Number(headingValue);
+  const arm = Number.isFinite(heading) ? identifyJunctionArm(junctionId, heading) : null;
+  let reason = "Green gate ready";
+  if (directionAnalysis.state === "RECEDING") reason = "Ambulance moving away";
+  else if (directionAnalysis.state !== "APPROACHING" || directionAnalysis.rSquared < DIRECTION_CONFIG.APPROACH_MIN_CONF) reason = "Trend uncertain";
+  else if (!arm) reason = "Not on a known arm";
+  else if (stage !== "confirmed") reason = "Siren not confirmed";
+  else if (checkDistance && getActiveApproachDistance() > maxMicRangeM()) reason = "Outside microphone range";
+  return { allowed: reason === "Green gate ready", reason, arm, approach: directionAnalysis.state.toLowerCase(), confidence: directionAnalysis.rSquared };
+}
+
+function renderDirectionReadout() {
+  const gate = evaluateDirectionGate();
+  if (typeof directionAnalysis.slopeDbS === "number" && $("#direction-slope")) $("#direction-slope").textContent = `${directionAnalysis.slopeDbS.toFixed(2)} dB/s`;
+  if ($("#direction-r2")) $("#direction-r2").textContent = directionAnalysis.rSquared.toFixed(2);
+  if ($("#direction-state")) $("#direction-state").textContent = directionAnalysis.state;
+  if ($("#direction-doppler")) $("#direction-doppler").textContent = directionAnalysis.dopplerHint;
+  if ($("#direction-arm")) $("#direction-arm").textContent = gate.arm || "Unknown";
+  if ($("#direction-stereo")) $("#direction-stereo").textContent = stereoHint;
+  if ($("#direction-gate")) $("#direction-gate").textContent = gate.allowed ? `Granted · ${gate.arm}` : `Denied · ${gate.reason}`;
+}
+
+function updateDirectionAnalysis(now) {
+  if (sirenDetector.state === "CANDIDATE" || sirenDetector.state === "CONFIRMED") {
+    if (now - lastDirectionSampleAt >= DIRECTION_CONFIG.SAMPLE_INTERVAL_MS) {
+      lastDirectionSampleAt = now;
+      const db = calculateRmsDb();
+      if (db !== null && Number.isFinite(db)) rmsTrendPoints.push({ time: now, db });
+      updateStereoHint();
+    }
+    rmsTrendPoints = rmsTrendPoints.filter(point => now - point.time <= DIRECTION_CONFIG.WINDOW_MS);
+    directionAnalysis = Object.assign(fitRmsTrend(), getDopplerHint());
+  } else {
+    rmsTrendPoints = [];
+    directionAnalysis = { slopeDbS: 0, rSquared: 0, state: "UNKNOWN", dopplerHint: "—", dopplerOffsetHz: 0 };
+  }
+  renderDirectionReadout();
+
+  const liveDirectionEvidence = !sirenTestMode && (sirenAudioMode === "mic" || sirenAudioMode === "synthetic");
+  if (preemptionActive && (liveDirectionEvidence || (approachSimulationActive && !directionSelfCheckRunning))) {
+    if (directionAnalysis.state === "RECEDING") {
+      if (!recedingSince) recedingSince = now;
+      if (!preemptionReleasePending && now - recedingSince >= DIRECTION_CONFIG.RECEDE_RELEASE_MS) {
+        releasePreemptionEarly();
+      }
+    } else recedingSince = 0;
+  } else {
+    recedingSince = 0;
+    const liveAudio = !sirenTestMode && (sirenAudioMode === "mic" || sirenAudioMode === "synthetic");
+    if (sirenDetector.state === "CONFIRMED" && (liveAudio || (approachSimulationActive && !directionSelfCheckRunning)) &&
+        !preemptionRequestPending && !preemptionScheduled && now - lastSirenTriggerTime >= SIREN_CONFIG.RETRIGGER_COOLDOWN_MS) {
+      const vehicleId = $("#verified-vehicle")?.value || "";
+      const directionReady = directionAnalysis.state === "APPROACHING" && directionAnalysis.rSquared >= DIRECTION_CONFIG.APPROACH_MIN_CONF;
+      if (!vehicleId || directionReady) {
+        const gate = evaluateDirectionGate("confirmed", false);
+        lastSirenTriggerTime = now;
+        triggerPreemptionOverride({ confirmed: true, label: sirenDetector.label,
+          confidence: sirenDetector.confidence, stage: "confirmed", arm: gate.arm,
+          approach: directionAnalysis.state.toLowerCase(), approach_conf: directionAnalysis.rSquared });
+      }
+    }
+  }
+}
+
+function createStereoChannelAnalyser() {
+  const channelAnalyser = audioCtx.createAnalyser();
+  channelAnalyser.fftSize = SIREN_CONFIG.FFT_SIZE;
+  channelAnalyser.smoothingTimeConstant = 0;
+  return channelAnalyser;
+}
+
+function configureStereoMicHints(stream) {
+  const settings = stream.getAudioTracks()[0]?.getSettings?.() || {};
+  if (!Number.isFinite(Number(settings.channelCount)) || Number(settings.channelCount) < 2) return; // Mono/unknown devices skip silently.
+  channelSplitter = audioCtx.createChannelSplitter(2);
+  leftChannelAnalyser = createStereoChannelAnalyser();
+  rightChannelAnalyser = createStereoChannelAnalyser();
+  leftChannelData = new Float32Array(leftChannelAnalyser.fftSize);
+  rightChannelData = new Float32Array(rightChannelAnalyser.fftSize);
+  micSource.connect(channelSplitter);
+  channelSplitter.connect(leftChannelAnalyser, 0);
+  channelSplitter.connect(rightChannelAnalyser, 1);
+}
+
+function updateStereoHint() {
+  if (!leftChannelAnalyser || !rightChannelAnalyser || !leftChannelData || !rightChannelData) return;
+  leftChannelAnalyser.getFloatTimeDomainData(leftChannelData);
+  rightChannelAnalyser.getFloatTimeDomainData(rightChannelData);
+  let leftSquares = 0, rightSquares = 0;
+  for (let i = 0; i < leftChannelData.length; i++) {
+    leftSquares += leftChannelData[i] ** 2;
+    rightSquares += rightChannelData[i] ** 2;
+  }
+  const levelDifferenceDb = 10 * Math.log10(Math.max(leftSquares, 1e-12) / Math.max(rightSquares, 1e-12));
+  let bestLag = 0, bestCorrelation = -Infinity;
+  const stride = 4;
+  const maxLag = DIRECTION_CONFIG.STEREO_MAX_LAG_SAMPLES;
+  for (let lag = -maxLag; lag <= maxLag; lag++) {
+    let cross = 0, leftPower = 0, rightPower = 0;
+    for (let i = maxLag; i < leftChannelData.length - maxLag; i += stride) {
+      const j = i + lag;
+      const left = leftChannelData[i], right = rightChannelData[j];
+      cross += left * right;
+      leftPower += left * left;
+      rightPower += right * right;
+    }
+    const correlation = cross / Math.sqrt(Math.max(leftPower * rightPower, 1e-20));
+    if (correlation > bestCorrelation) { bestCorrelation = correlation; bestLag = lag; }
+  }
+  const levelHint = Math.abs(levelDifferenceDb) < 1.5 ? "Balanced" : levelDifferenceDb > 0 ? "Left louder" : "Right louder";
+  const delayMs = bestLag / audioCtx.sampleRate * 1000;
+  stereoHint = `${levelHint}; lag ${delayMs.toFixed(2)} ms (supporting evidence)`;
+}
+
+function getActiveApproachDistance() {
+  return approachSimulationActive || directionSelfCheckRunning
+    ? Number($("#ambulance-sim-distance")?.value ?? approachDistanceM)
+    : Number($("#preempt-dist")?.value || 0);
+}
+
+async function releasePreemptionEarly() {
+  preemptionReleasePending = true;
+  const junction_id = $("#preempt-junction")?.value || "J1";
+  try {
+    const result = await api("/api/preempt/release", { method: "POST", body: JSON.stringify({ junction_id }) });
+    preemptionActive = false;
+    toast("Ambulance moving away; starting amber and all-red clearance before normal cycle resumes.");
+    await load();
+    setTimeout(load, result.amber_seconds * 1000 + 100);
+    setTimeout(load, (result.amber_seconds + result.all_red_seconds) * 1000 + 200);
+  } catch (error) {
+    console.error("Could not begin safe preemption release:", error);
+  } finally {
+    preemptionReleasePending = false;
+    recedingSince = 0;
+  }
+}
+
+function renderApproachSimulator() {
+  const distance = Number($("#ambulance-sim-distance")?.value ?? approachDistanceM);
+  const speed = Number($("#ambulance-sim-speed")?.value ?? $("#preempt-speed")?.value ?? 65);
+  approachDistanceM = distance;
+  const micRange = maxMicRangeM();
+  const armed = distance <= RANGE_CONFIG.ARM_DISTANCE_M;
+  const confirmed = distance <= micRange && sirenDetector.state === "CONFIRMED";
+  const eta = speed > 0 ? distance / (speed / 3.6) : 0;
+  const queue = calculateQueueDischarge(Number($("#preempt-cars")?.value || 14), Number($("#preempt-trucks")?.value || 3),
+    Number($("#preempt-bikes")?.value || 22), 0, 2);
+  const greenStartIn = eta - queue.high_sec;
+  if ($("#ambulance-sim-distance-value")) $("#ambulance-sim-distance-value").textContent = `${Math.round(distance)} m`;
+  if ($("#ambulance-sim-eta")) $("#ambulance-sim-eta").textContent = `${eta.toFixed(1)} s`;
+  if ($("#approach-state")) $("#approach-state").textContent = confirmed ? "CONFIRMED" : armed ? "ARMED" : "IDLE";
+  if ($("#approach-armed-at")) $("#approach-armed-at").textContent = `${RANGE_CONFIG.ARM_DISTANCE_M} m`;
+  if ($("#approach-confirmed-at")) $("#approach-confirmed-at").textContent = `${Math.round(micRange)} m + siren`;
+  if ($("#approach-queue-countdown")) $("#approach-queue-countdown").textContent = !armed
+    ? "Waiting for network warning."
+    : greenStartIn < 0
+      ? "TOO LATE: queue will not clear in time."
+      : `Green start countdown: ${greenStartIn.toFixed(1)}s using the HIGH queue estimate; green held.`;
+  renderDirectionReadout();
 }
 
 async function triggerPreemptionOverride(sirenEvent) {
@@ -402,11 +794,12 @@ async function triggerPreemptionOverride(sirenEvent) {
   const cars = parseInt($("#preempt-cars")?.value || 14);
   const trucks = parseInt($("#preempt-trucks")?.value || 3);
   const bikes = parseInt($("#preempt-bikes")?.value || 22);
-  const ambulance_dist_m = parseFloat($("#preempt-dist")?.value || 450);
-  const ambulance_speed_kmh = parseFloat($("#preempt-speed")?.value || 65);
+  const vehicle_id = $("#verified-vehicle")?.value || "";
   const event = sirenEvent || { confirmed: false, label: "none", confidence: 0 };
+  if (event.stage !== "confirmed" || !event.confirmed) return;
   const siren_confidence = Math.max(0, Math.min(1, Number(event.confidence) || 0));
 
+  preemptionRequestPending = true;
   try {
     const res = await api("/api/preempt/trigger", {
       method: "POST",
@@ -415,23 +808,45 @@ async function triggerPreemptionOverride(sirenEvent) {
         cars,
         trucks,
         bikes,
-        ambulance_dist_m,
-        ambulance_speed_kmh,
+        ...(vehicle_id ? { vehicle_id } : {}),
         siren_confidence,
         siren_confirmed: !!event.confirmed,
-        siren_label: event.label || "none"
+        siren_label: event.label || "none",
+        stage: event.stage,
+        approach: event.approach,
+        approach_conf: event.approach_conf,
       })
     });
 
-    if (res.ok) {
+    if (res.decision === "WAIT") {
+      preemptionScheduled = true;
+      const scheduledVehicle = vehicle_id;
+      const delayMs = Math.max(250, (res.green_start_in - QUEUE_CONFIG.GREEN_START_EARLY_BUFFER_S) * 1000);
+      if ($("#dual-key-status")) $("#dual-key-status").textContent = "Queue discharge timing: " + res.reason;
+      setTimeout(() => {
+        preemptionScheduled = false;
+        const detectorStillConfirmed = sirenDetector.state === "CONFIRMED" && directionAnalysis.state === "APPROACHING" &&
+          directionAnalysis.rSquared >= DIRECTION_CONFIG.APPROACH_MIN_CONF && $("#verified-vehicle")?.value === scheduledVehicle;
+        if (detectorStillConfirmed) triggerPreemptionOverride(event);
+        else if ($("#dual-key-status")) $("#dual-key-status").textContent = "Queue-discharge wait cancelled because the siren, direction, or selected vehicle is no longer confirmed.";
+      }, delayMs);
+    } else if (res.decision === "GRANTED") {
+      preemptionScheduled = false;
+      preemptionActive = true;
       await load();
       const gwEl = $("#svg-green-wave-corridor");
       if (gwEl) gwEl.classList.add("active");
-      toast(`🚑 Emergency Green Wave Active! Queue Flush T=${res.t_flush_sec}s`);
+      toast(`🚑 Emergency Green Wave Active! Queue Discharge T=${res.t_flush_sec}s (high ${res.t_flush_high_sec}s)`);
+    } else {
+      if ($("#dual-key-status")) $("#dual-key-status").textContent = `${res.decision}: ${res.reason}`;
+      toast(`${res.decision}: ${res.reason}`);
     }
   } catch (err) {
     console.error("Preempt error:", err);
-    toast("Could not trigger emergency preemption");
+    if ($("#dual-key-status")) $("#dual-key-status").textContent = `${err.data?.decision || "DENIED"}: ${err.message}`;
+    toast(err.message || "Could not trigger emergency preemption");
+  } finally {
+    preemptionRequestPending = false;
   }
 }
 
@@ -471,6 +886,7 @@ function ensureSirenAnalyser() {
     analyser.smoothingTimeConstant = 0;
     sirenFloatData = new Float32Array(analyser.frequencyBinCount);
     sirenByteData = new Uint8Array(analyser.frequencyBinCount);
+    sirenTimeData = new Float32Array(analyser.fftSize);
     const silentSink = audioCtx.createGain();
     silentSink.gain.value = 0;
     analyser.connect(silentSink);
@@ -481,6 +897,9 @@ function ensureSirenAnalyser() {
 
 function resetSirenDetector() {
   sirenHistory = [];
+  rmsTrendPoints = [];
+  directionAnalysis = { slopeDbS: 0, rSquared: 0, state: "UNKNOWN", dopplerHint: "—", dopplerOffsetHz: 0 };
+  lastDirectionSampleAt = 0;
   sirenDetector.state = "IDLE";
   sirenDetector.label = "none";
   sirenDetector.confidence = 0;
@@ -490,6 +909,7 @@ function resetSirenDetector() {
   sirenConfidence = 0;
   sirenLabel = "none";
   renderSirenReadout(null);
+  renderDirectionReadout();
 }
 
 function renderSirenReadout(frame) {
@@ -704,8 +1124,6 @@ function classifySirenWindow(now) {
 }
 
 function setSirenState(pattern, now) {
-  const previousState = sirenDetector.state;
-  const previousLabel = sirenDetector.label;
   if (pattern) {
     sirenDetector.lastPatternAt = now;
     if (sirenDetector.state === "CONFIRMED" && sirenDetector.label !== pattern.label) {
@@ -721,15 +1139,6 @@ function setSirenState(pattern, now) {
     if (pattern.ready && pattern.confidence >= SIREN_CONFIG.MIN_CONFIRM_CONFIDENCE) {
       sirenDetector.state = "CONFIRMED";
       sirenDetector.label = pattern.label;
-      if (previousState !== "CONFIRMED" || previousLabel !== pattern.label) {
-        const triggerAllowed = !sirenTestMode && (sirenAudioMode === "mic" || sirenAudioMode === "synthetic") &&
-          now - lastSirenTriggerTime >= SIREN_CONFIG.RETRIGGER_COOLDOWN_MS;
-        if (triggerAllowed) {
-          lastSirenTriggerTime = now;
-          toast("Siren pattern confirmed (" + pattern.label + ") — starting simulated preemption.");
-          triggerPreemptionOverride({ confirmed: true, label: pattern.label, confidence: pattern.confidence });
-        }
-      }
     }
   } else if (sirenDetector.state !== "IDLE" && now - sirenDetector.lastPatternAt > SIREN_CONFIG.STATE_DROP_MS) {
     sirenDetector.state = "IDLE";
@@ -747,7 +1156,9 @@ function processSirenFrame(now) {
   sirenHistory.push(frame);
   sirenHistory = sirenHistory.filter(item => now - item.time <= SIREN_CONFIG.WINDOW_MS);
   setSirenState(classifySirenWindow(now), now);
+  updateDirectionAnalysis(now);
   renderSirenReadout(frame);
+  renderApproachSimulator();
   return frame;
 }
 
@@ -828,11 +1239,30 @@ function startSirenSignal(name, options) {
   output.connect(audioCtx.destination);
   activeSignalNodes.push(output);
 
+  // The analysis-side gain creates controlled level trends for direction tests.
+  const analysisGain = audioCtx.createGain();
+  const motion = settings.directionTest || "constant";
+  const startedAt = audioCtx.currentTime;
+  const duration = SIREN_CONFIG.TEST_SIGNAL_DURATION_MS / 1000;
+  if (motion === "approach") {
+    analysisGain.gain.setValueAtTime(0.08, startedAt);
+    analysisGain.gain.linearRampToValueAtTime(0.9, startedAt + duration);
+  } else if (motion === "recede") {
+    analysisGain.gain.setValueAtTime(0.9, startedAt);
+    analysisGain.gain.linearRampToValueAtTime(0.08, startedAt + duration);
+  } else {
+    analysisGain.gain.value = 0.4;
+  }
+  analysisGain.connect(analyser);
+  activeSignalNodes.push(analysisGain);
+
   function connectTone(frequency, waveform) {
     const oscillator = audioCtx.createOscillator();
     oscillator.type = waveform || "sine";
     oscillator.frequency.value = frequency;
-    oscillator.connect(analyser);
+    if (settings.dopplerDirection === "approach") oscillator.detune.value = DIRECTION_CONFIG.DOPPLER_TEST_SHIFT_CENTS;
+    if (settings.dopplerDirection === "recede") oscillator.detune.value = -DIRECTION_CONFIG.DOPPLER_TEST_SHIFT_CENTS;
+    oscillator.connect(analysisGain);
     oscillator.connect(output);
     activeSignalNodes.push(oscillator);
     oscillator.start();
@@ -847,7 +1277,7 @@ function startSirenSignal(name, options) {
     const source = audioCtx.createBufferSource();
     source.buffer = buffer;
     source.loop = true;
-    source.connect(analyser);
+    source.connect(analysisGain);
     source.connect(output);
     source.start();
     activeSignalNodes.push(source);
@@ -899,9 +1329,10 @@ async function toggleMic() {
     if (audioCtx.state === "suspended") await audioCtx.resume();
     if (!micPermissionFailed && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       try {
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: { ideal: 2 } }, video: false });
         micSource = audioCtx.createMediaStreamSource(micStream);
         micSource.connect(analyser);
+        configureStereoMicHints(micStream);
         sirenAudioMode = "mic";
         sirenTestMode = false;
         isMicActive = true;
@@ -926,6 +1357,11 @@ function stopMic() {
     try { micSource.disconnect(); } catch (error) {}
     micSource = null;
   }
+  if (channelSplitter) { try { channelSplitter.disconnect(); } catch (error) {} }
+  [leftChannelAnalyser, rightChannelAnalyser].forEach(node => { if (node) { try { node.disconnect(); } catch (error) {} } });
+  channelSplitter = leftChannelAnalyser = rightChannelAnalyser = null;
+  leftChannelData = rightChannelData = null;
+  stereoHint = "—";
   if (micStream) {
     micStream.getTracks().forEach(track => track.stop());
     micStream = null;
@@ -938,16 +1374,273 @@ function stopMic() {
   renderSirenReadout(null);
 }
 
+function bytesToBase64(bytes) {
+  let binary = "";
+  new Uint8Array(bytes).forEach(byte => { binary += String.fromCharCode(byte); });
+  return btoa(binary);
+}
+
+function pointAtDistance(distanceM, headingDeg) {
+  const radius = 6371000, lat1 = 13.3110 * Math.PI / 180, lon1 = 76.9410 * Math.PI / 180;
+  const bearing = ((headingDeg + 180) % 360) * Math.PI / 180, delta = distanceM / radius;
+  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(delta) + Math.cos(lat1) * Math.sin(delta) * Math.cos(bearing));
+  const lon2 = lon1 + Math.atan2(Math.sin(bearing) * Math.sin(delta) * Math.cos(lat1), Math.cos(delta) - Math.sin(lat1) * Math.sin(lat2));
+  return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI];
+}
+
+async function createAttackVehicle(vehicleId) {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
+  const pub = bytesToBase64(await crypto.subtle.exportKey("spki", pair.publicKey));
+  const enrolled = await fetch("/api/vehicle/enroll", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vehicle_id: vehicleId, public_key: pub }) }).then(r => r.json());
+  if (!enrolled.ok) throw Error(enrolled.reason);
+  const admin = $("#admin-token")?.value || "";
+  const approval = await fetch(`/api/dev/vehicle/${encodeURIComponent(vehicleId)}/status`, { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Token": admin }, body: JSON.stringify({ status: "approved" }) }).then(async r => ({ ok: r.ok, data: await r.json() }));
+  if (!approval.ok) throw Error(approval.data.reason);
+  return { vehicleId, privateKey: pair.privateKey };
+}
+
+async function signedAttackReport(fixture, distanceM, heading = 10, speed = 55, timestamp = Math.floor(Date.now() / 1000)) {
+  const [lat, lon] = pointAtDistance(distanceM, heading);
+  const nonce = bytesToBase64(crypto.getRandomValues(new Uint8Array(18))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const payload = { vehicle_id: fixture.vehicleId, lat: lat.toFixed(7), lon: lon.toFixed(7), heading_deg: heading.toFixed(2), speed_kmh: speed.toFixed(2), timestamp, nonce };
+  const canonical = JSON.stringify(Object.fromEntries(Object.keys(payload).sort().map(key => [key, payload[key]])));
+  const signature = bytesToBase64(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, fixture.privateKey, new TextEncoder().encode(canonical)));
+  return { ...payload, signature };
+}
+
+async function attackPost(url, body, headers = {}) {
+  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
+  const data = await response.json().catch(() => ({}));
+  return { ok: response.ok, status: response.status, ...data };
+}
+
+async function runDualKeyAttack(name) {
+  const selectedJunction = "J2"; // Attack fixtures are positioned relative to the demo ambulance page's J2 location.
+  const trigger = (vehicle_id, stage = "confirmed") => attackPost("/api/preempt/trigger", { junction_id: selectedJunction, vehicle_id, stage, siren_confirmed: true, siren_label: "wail", siren_confidence: 0.95, approach: "approaching", approach_conf: 0.95 });
+  let result;
+  if (name === "recorded") result = await trigger(null);
+  else if (name === "replay") {
+    const fixture = await createAttackVehicle(`atk-replay-${Date.now()}`), signed = await signedAttackReport(fixture, 130);
+    await attackPost("/api/vehicle/report", signed); result = await attackPost("/api/vehicle/report", signed);
+  } else if (name === "tamper") {
+    const fixture = await createAttackVehicle(`atk-tamper-${Date.now()}`), signed = await signedAttackReport(fixture, 130);
+    signed.lat = pointAtDistance(5000, 10)[0].toFixed(7); result = await attackPost("/api/vehicle/report", signed);
+  } else if (name === "revoked") {
+    const fixture = await createAttackVehicle(`atk-revoked-${Date.now()}`);
+    await attackPost(`/api/dev/vehicle/${fixture.vehicleId}/status`, { status: "revoked" }, { "X-Admin-Token": $("#admin-token")?.value || "" });
+    result = await trigger(fixture.vehicleId);
+  } else if (name === "teleport") {
+    const fixture = await createAttackVehicle(`atk-teleport-${Date.now()}`), first = await signedAttackReport(fixture, 300);
+    await attackPost("/api/vehicle/report", first);
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    result = await attackPost("/api/vehicle/report", await signedAttackReport(fixture, 5300));
+  } else {
+    const fixture = await createAttackVehicle(`atk-valid-${Date.now()}`);
+    await attackPost("/api/vehicle/report", await signedAttackReport(fixture, 130));
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    await attackPost("/api/vehicle/report", await signedAttackReport(fixture, 100));
+    result = await trigger(fixture.vehicleId);
+  }
+  const passed = name === "valid" ? result.decision === "GRANTED" : name === "recorded" ? result.decision === "WATCH" : !result.ok;
+  const line = `${passed ? "PASS" : "FAIL"} ${name}: ${result.decision || result.reason || result.status} — ${result.reason || ""}`;
+  console[passed ? "log" : "error"](line);
+  if ($("#dual-key-status")) $("#dual-key-status").textContent = line;
+  await refreshDualKeyData();
+  return passed;
+}
+
+async function refreshDualKeyData() {
+  const [vehicles, audit] = await Promise.all([fetch("/api/vehicles").then(r => r.json()), fetch("/api/audit").then(r => r.json())]);
+  latestVerifiedVehicleReports = Object.fromEntries(vehicles.vehicles
+    .filter(vehicle => vehicle.status === "approved" && vehicle.junctions)
+    .map(vehicle => [vehicle.vehicle_id, vehicle.junctions]));
+  const selected = $("#verified-vehicle")?.value;
+  if ($("#verified-vehicle")) $("#verified-vehicle").innerHTML = '<option value="">No vehicle selected</option>' + vehicles.vehicles.filter(v => v.status === "approved").map(v => `<option value="${v.vehicle_id}">${v.vehicle_id}</option>`).join("");
+  if (selected && $("#verified-vehicle")) $("#verified-vehicle").value = selected;
+  if ($("#vehicle-registry-body")) $("#vehicle-registry-body").innerHTML = vehicles.vehicles.map(v => `<tr><td>${v.vehicle_id}</td><td>${v.status}</td><td>${v.last_report_at || "—"}</td><td>${v.status === "approved" ? `<button data-admin-status="revoked" data-vehicle="${v.vehicle_id}">Revoke</button>` : `<button data-admin-status="approved" data-vehicle="${v.vehicle_id}">Approve</button>`}</td></tr>`).join("");
+  $("#vehicle-registry-body")?.querySelectorAll("[data-admin-status]").forEach(button => button.addEventListener("click", async () => {
+    const result = await attackPost(`/api/dev/vehicle/${encodeURIComponent(button.dataset.vehicle)}/status`, { status: button.dataset.adminStatus }, { "X-Admin-Token": $("#admin-token")?.value || "" });
+    if (!result.ok) toast(result.reason); await refreshDualKeyData();
+  }));
+  if ($("#audit-chain-status")) $("#audit-chain-status").textContent = audit.chain_valid ? "CHAIN VALID" : "CHAIN BROKEN";
+  if ($("#audit-log-body")) $("#audit-log-body").innerHTML = audit.entries.slice().reverse().map(e => `<tr><td>${e.decision}</td><td>${e.reason}</td><td>${e.vehicle_id || "—"}</td><td>${e.junction || "—"}</td><td>${e.timestamp}</td></tr>`).join("");
+  updateLiveMath();
+}
+
+function initDualKeyTools(panel, enabled) {
+  panel.querySelectorAll("[data-attack]").forEach(button => button.addEventListener("click", () => runDualKeyAttack(button.dataset.attack).catch(error => { console.error(error); toast(error.message); })));
+  $("#vehicle-refresh")?.addEventListener("click", refreshDualKeyData);
+  $("#attack-self-check")?.addEventListener("click", async () => {
+    console.group("Dual-key spoof resistance self-check");
+    for (const name of ["recorded", "replay", "tamper", "revoked", "teleport", "valid"]) await runDualKeyAttack(name);
+    console.groupEnd();
+  });
+  if (enabled) refreshDualKeyData().catch(console.error);
+}
+
 function initSirenTestPanel() {
   const panel = $("#siren-test-panel");
   if (!panel) return;
+  const rangeDefaults = {
+    "#range-spl": RANGE_CONFIG.SIREN_SPL_REF_DB,
+    "#range-ref-dist": RANGE_CONFIG.REF_DIST_M,
+    "#range-noise": RANGE_CONFIG.TRAFFIC_NOISE_DB,
+    "#range-min-snr": RANGE_CONFIG.MIN_SNR_DB
+  };
+  Object.entries(rangeDefaults).forEach(([selector, value]) => {
+    const input = $(selector);
+    if (input && !input.value) input.value = value;
+  });
   const enabled = new URLSearchParams(window.location.search).get("dev") === "1";
   panel.hidden = !enabled;
+  initDualKeyTools(panel, enabled);
   panel.querySelectorAll("[data-siren-test]").forEach(button => {
     button.addEventListener("click", () => startSirenSignal(button.dataset.sirenTest, { testMode: true }));
   });
   const selfCheckButton = $("#siren-self-check");
   if (selfCheckButton) selfCheckButton.addEventListener("click", runSirenSelfCheck);
+  const rangeInputs = ["#range-spl", "#range-ref-dist", "#range-noise", "#range-min-snr"];
+  rangeInputs.forEach(selector => $(selector)?.addEventListener("input", renderRangeEstimate));
+  ["#ambulance-sim-distance", "#ambulance-sim-speed"].forEach(selector =>
+    $(selector)?.addEventListener("input", renderApproachSimulator));
+  $("#ambulance-sim-heading")?.addEventListener("input", renderDirectionReadout);
+  $("#preempt-junction")?.addEventListener("change", renderDirectionReadout);
+  panel.querySelectorAll("[data-direction-test]").forEach(button => {
+    button.addEventListener("click", () => {
+      const motion = button.dataset.directionTest;
+      const dopplerDirection = motion === "approach" ? "approach" : motion === "recede" ? "recede" : "none";
+      approachSimulationActive = motion === "recede" && preemptionActive;
+      startSirenSignal("wail", { testMode: true, directionTest: motion, dopplerDirection });
+      if (approachSimulationActive) {
+        setTimeout(() => { approachSimulationActive = false; }, SIREN_CONFIG.TEST_SIGNAL_DURATION_MS + 100);
+      }
+      if ($("#siren-test-playing")) $("#siren-test-playing").textContent = `Synthetic ${motion} level and Doppler test is running locally; no audio is uploaded.`;
+      renderDirectionReadout();
+    });
+  });
+  $("#direction-self-check")?.addEventListener("click", runDirectionSelfCheck);
+  $("#ambulance-sim-run")?.addEventListener("click", runAmbulanceApproach);
+  $("#ambulance-sim-siren")?.addEventListener("click", () => {
+    simulateApproachSiren();
+  });
+  renderRangeEstimate();
+}
+
+function simulateApproachSiren() {
+  const distance = Number($("#ambulance-sim-distance")?.value ?? approachDistanceM);
+  const speed = Number($("#ambulance-sim-speed")?.value || 65);
+  if (distance > maxMicRangeM()) {
+    toast("Move the simulated ambulance into the estimated microphone range first.");
+    return;
+  }
+  approachSimulationActive = true;
+  if (!startSirenSignal("wail", { testMode: true, directionTest: "approach", dopplerDirection: "approach" })) {
+    approachSimulationActive = false;
+    return;
+  }
+  const deadline = performance.now() + SIREN_CONFIG.TEST_SIGNAL_DURATION_MS;
+  const check = setInterval(() => {
+    if (preemptionActive || preemptionRequestPending) {
+      clearInterval(check);
+      approachSimulationActive = false;
+    } else if (performance.now() >= deadline || distance > maxMicRangeM()) {
+      clearInterval(check);
+      approachSimulationActive = false;
+    }
+  }, SIREN_CONFIG.SAMPLE_INTERVAL_MS);
+}
+
+async function runDirectionSelfCheck() {
+  if (micStream) {
+    console.warn("Direction self-check: stop the live microphone first.");
+    return;
+  }
+  const junctionId = $("#preempt-junction")?.value || "J1";
+  const correctArm = JUNCTION_ARMS[junctionId]?.[0];
+  if (!correctArm) return;
+  const cases = [
+    { motion: "approach", heading: correctArm.bearing, expected: true },
+    { motion: "recede", heading: correctArm.bearing, expected: false },
+    { motion: "constant", heading: correctArm.bearing, expected: false },
+    { motion: "approach", heading: (correctArm.bearing + DIRECTION_CONFIG.ARM_TOLERANCE_DEG + 10) % 360, expected: false }
+  ];
+  const previousDistance = $("#ambulance-sim-distance")?.value;
+  const previousHeading = $("#ambulance-sim-heading")?.value;
+  if ($("#ambulance-sim-distance")) $("#ambulance-sim-distance").value = String(Math.max(0, Math.floor(maxMicRangeM() / 2)));
+  approachSimulationActive = false;
+  directionSelfCheckRunning = true;
+  const results = [];
+  console.group("DOME Flow approach/recede and arm self-check");
+  for (const testCase of cases) {
+    $("#ambulance-sim-heading").value = testCase.heading;
+    resetSirenDetector();
+    directionAnalysis = { slopeDbS: 0, rSquared: 0, state: "UNKNOWN", dopplerHint: "—", dopplerOffsetHz: 0 };
+    rmsTrendPoints = [];
+    const dopplerDirection = testCase.motion === "approach" ? "approach" : testCase.motion === "recede" ? "recede" : "none";
+    startSirenSignal("wail", { testMode: true, directionTest: testCase.motion, dopplerDirection });
+    await waitForSirenTest(SIREN_CONFIG.TEST_SIGNAL_DURATION_MS);
+    const detectorConfirmed = sirenDetector.state === "CONFIRMED";
+    const gate = evaluateDirectionGate(detectorConfirmed ? "confirmed" : "armed");
+    const granted = detectorConfirmed && gate.allowed;
+    const passed = granted === testCase.expected;
+    const result = {
+      motion: testCase.motion,
+      heading: testCase.heading,
+      approach: directionAnalysis.state,
+      slopeDbS: Number(directionAnalysis.slopeDbS.toFixed(2)),
+      rSquared: Number(directionAnalysis.rSquared.toFixed(2)),
+      doppler: directionAnalysis.dopplerHint,
+      arm: gate.arm || "unknown",
+      expected: testCase.expected ? "granted" : "denied",
+      actual: granted ? "granted" : gate.reason,
+      result: passed ? "PASS" : "FAIL"
+    };
+    results.push(result);
+    console.log(result.result + " — " + result.motion, result);
+    stopGeneratedSignal();
+    resetSirenDetector();
+    directionAnalysis = { slopeDbS: 0, rSquared: 0, state: "UNKNOWN", dopplerHint: "—", dopplerOffsetHz: 0 };
+    await waitForSirenTest(DIRECTION_CONFIG.SAMPLE_INTERVAL_MS * 2);
+  }
+  console.table(results);
+  console.groupEnd();
+  directionSelfCheckRunning = false;
+  if ($("#ambulance-sim-distance") && previousDistance !== undefined) $("#ambulance-sim-distance").value = previousDistance;
+  if ($("#ambulance-sim-heading") && previousHeading !== undefined) $("#ambulance-sim-heading").value = previousHeading;
+  renderApproachSimulator();
+}
+
+function runAmbulanceApproach() {
+  clearInterval(approachTimer);
+  const distanceInput = $("#ambulance-sim-distance");
+  const speed = Number($("#ambulance-sim-speed")?.value || 65);
+  if (!distanceInput || speed <= 0) return;
+  distanceInput.value = 600;
+  approachDistanceM = 600;
+  approachSimulationActive = true;
+  resetSirenDetector();
+  let lastDistance = 600;
+  approachTimer = setInterval(() => {
+    const current = Math.max(0, Number(distanceInput.value) - speed / 3.6 * 0.25);
+    distanceInput.value = current.toFixed(0);
+    approachDistanceM = current;
+    if (lastDistance > RANGE_CONFIG.ARM_DISTANCE_M && current <= RANGE_CONFIG.ARM_DISTANCE_M) {
+      const eta = speed > 0 ? current / (speed / 3.6) : 0;
+      api("/api/preempt/trigger", {
+        method: "POST",
+        body: JSON.stringify({ stage: "armed", distance_m: current, eta_s: eta })
+      }).catch(error => console.warn("Approach arm notification failed:", error));
+    }
+    if (current <= maxMicRangeM() && !activeSignalNodes.length) {
+      startSirenSignal("wail", { testMode: true, directionTest: "approach", dopplerDirection: "approach" });
+    }
+    renderApproachSimulator();
+    lastDistance = current;
+    if (preemptionActive || preemptionRequestPending || current <= 0) {
+      clearInterval(approachTimer);
+      approachSimulationActive = false;
+    }
+  }, 250);
 }
 
 function waitForSirenTest(ms) {
@@ -1008,6 +1701,8 @@ function initModuleA() {
       el.addEventListener("change", updateLiveMath);
     }
   });
+  $("#verified-vehicle")?.addEventListener("change", updateLiveMath);
+  $("#queue-self-check")?.addEventListener("click", runQueueModelSelfCheck);
 
   if ($("#preempt-junction")) {
     $("#preempt-junction").addEventListener("change", () => {
@@ -1024,7 +1719,9 @@ function initModuleA() {
     });
   }
 
-  if ($("#btn-trigger-preempt")) $("#btn-trigger-preempt").onclick = triggerPreemptionOverride;
+  if ($("#btn-trigger-preempt")) $("#btn-trigger-preempt").onclick = () => {
+    toast("Manual override is gated. Use a confirmed close-range siren pattern to simulate preemption.");
+  };
   if ($("#btn-mic-toggle")) $("#btn-mic-toggle").onclick = toggleMic;
 
   initFFTCanvas();

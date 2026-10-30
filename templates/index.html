@@ -92,7 +92,7 @@
               <span title="Queued Trucks">🚚 <b class="q-trucks">4</b></span>
               <span title="Queued Bikes">🛵 <b class="q-bikes">18</b></span>
             </div>
-            <div class="junction-flush"><small>GREENSHIELDS QUEUE-FLUSH</small> T_flush: <strong class="q-flush">36.2s</strong></div>
+            <div class="junction-flush"><small>QUEUE DISCHARGE (saturation flow)</small> T_flush: <strong class="q-flush">35.3s</strong> <small class="q-flush-range">27.0–50.1s</small></div>
           </div>
           <div class="junction-card glass" data-junction="J2">
             <div class="junction-header">
@@ -104,7 +104,7 @@
               <span title="Queued Trucks">🚚 <b class="q-trucks">8</b></span>
               <span title="Queued Bikes">🛵 <b class="q-bikes">35</b></span>
             </div>
-            <div class="junction-flush"><small>GREENSHIELDS QUEUE-FLUSH</small> T_flush: <strong class="q-flush">68.5s</strong></div>
+            <div class="junction-flush"><small>QUEUE DISCHARGE (saturation flow)</small> T_flush: <strong class="q-flush">64.6s</strong> <small class="q-flush-range">48.2–93.9s</small></div>
           </div>
           <div class="junction-card glass" data-junction="J3">
             <div class="junction-header">
@@ -116,7 +116,7 @@
               <span title="Queued Trucks">🚚 <b class="q-trucks">7</b></span>
               <span title="Queued Bikes">🛵 <b class="q-bikes">26</b></span>
             </div>
-            <div class="junction-flush"><small>GREENSHIELDS QUEUE-FLUSH</small> T_flush: <strong class="q-flush">56.5s</strong></div>
+            <div class="junction-flush"><small>QUEUE DISCHARGE (saturation flow)</small> T_flush: <strong class="q-flush">52.9s</strong> <small class="q-flush-range">39.7–76.3s</small></div>
           </div>
           <div class="junction-card glass" data-junction="J4">
             <div class="junction-header">
@@ -128,7 +128,7 @@
               <span title="Queued Trucks">🚚 <b class="q-trucks">9</b></span>
               <span title="Queued Bikes">🛵 <b class="q-bikes">42</b></span>
             </div>
-            <div class="junction-flush"><small>GREENSHIELDS QUEUE-FLUSH</small> T_flush: <strong class="q-flush">78.7s</strong></div>
+            <div class="junction-flush"><small>QUEUE DISCHARGE (saturation flow)</small> T_flush: <strong class="q-flush">74.3s</strong> <small class="q-flush-range">55.2–108.4s</small></div>
           </div>
         </div>
       </div>
@@ -158,7 +158,7 @@
           <div class="route-card"><div class="route-top"><span class="route-icon">↗</span><div><b>Suggested detour</b><small>For ORR · Marathahalli</small></div><span class="route-tag">+7 min</span></div><p>Kundalahalli Gate <span>→</span> AECS Layout <span>→</span> Service road</p><button class="route-action" data-incident="DF-104">View route details <b>↗</b></button></div>
         </div>
       </div>
-      <div class="help-strip glass"><div class="help-symbol">✳</div><div><b>How DOME Flow S2 helps the city &amp; highway</b><p>Combines acoustic FFT emergency vehicle preemption, Greenshields queue-flushing, and zero-touch crowd-sourced road surface shocks to eliminate emergency bottlenecks and prevent pothole accidents.</p></div><span class="help-arrow">↗</span></div>
+      <div class="help-strip glass"><div class="help-symbol">✳</div><div><b>How DOME Flow S2 helps the city &amp; highway</b><p>Combines acoustic FFT emergency vehicle preemption, saturation-flow queue discharge, and zero-touch crowd-sourced road surface shocks to support emergency response and identify pothole risks.</p></div><span class="help-arrow">↗</span></div>
     </section>
 
     <!-- 2. TRAFFIC & INCIDENTS VIEW -->
@@ -180,7 +180,7 @@
       <div class="view-intro"><div><div class="section-kicker">NETWORK PERFORMANCE</div><h2>Mobility analytics</h2><p class="muted">Illustrative trends to support operational and infrastructure decisions.</p></div><span class="demo-pill"><i></i> SAMPLE METRICS</span></div>
       <div class="analytics-kpis"><div class="metric glass"><small>AVG. TRAVEL TIME</small><strong>28 <small>min</small></strong><span class="positive">↓ 8% this week</span></div><div class="metric glass"><small>CONGESTION HOTSPOTS</small><strong>4</strong><span class="amber-text">2 high-priority corridors</span></div><div class="metric glass"><small>INCIDENT RESPONSE</small><strong>6 <small>min</small></strong><span class="positive">↓ 2 min this month</span></div><div class="metric glass"><small>TRAFFIC FLOW</small><strong>72<span>%</span></strong><span class="positive">↑ 4% this hour</span></div></div>
       <div class="analytics-grid"><div class="panel glass chart-panel"><div class="panel-heading"><div><div class="section-kicker">WEEKLY MOVEMENT</div><h3>Average travel time</h3></div><span class="small-muted">Minutes · sample</span></div><div class="chart" id="travelChart"></div></div><div class="panel glass chart-panel"><div class="panel-heading"><div><div class="section-kicker">CORRIDOR WATCH</div><h3>Congestion hotspots</h3></div><span class="small-muted">Relative load</span></div><div class="hotspots" id="hotspots-container"><div><span>Outer Ring Road</span><b>82%</b><i><em style="width:82%"></em></i></div><div><span>Old Airport Road</span><b>67%</b><i><em style="width:67%"></em></i></div><div><span>100 Feet Road</span><b>54%</b><i><em style="width:54%"></em></i></div><div><span>MG Road</span><b>29%</b><i><em style="width:29%"></em></i></div></div></div></div>
-      <div class="insight-card glass"><span class="insight-icon">✦</span><div><b>Operational insight</b><p>Outer Ring Road / Gubbi Town Cross is the strongest congestion bottleneck in this sample. Prioritising Greenshields queue clearance may reduce pressure on emergency response vehicles by up to 45%.</p></div></div>
+      <div class="insight-card glass"><span class="insight-icon">✦</span><div><b>Operational insight</b><p>Outer Ring Road / Gubbi Town Cross is the strongest congestion bottleneck in this sample. The queue-discharge estimate highlights when approach queues may need earlier clearance for an emergency vehicle.</p></div></div>
     </section>
 
     <!-- 5. S2 COMMAND VIEW (STEP 4) -->
@@ -189,7 +189,7 @@
         <div>
           <div class="section-kicker">S2 EDGE AI &amp; INERTIAL PREEMPTION ENGINE</div>
           <h2>S2 Command Center</h2>
-          <p class="muted">Zero-hardware acoustic ambulance siren detection + Greenshields queue-flushing &amp; zero-touch telematics crowd blackspot probes.</p>
+          <p class="muted">A junction setup needs a microphone and a small edge device. A signed ambulance token and confirmed approaching siren must agree; the audit log records each decision.</p>
         </div>
         <span class="operator-badge pulse-badge">🚨 S2 Edge Core Active</span>
       </div>
@@ -199,8 +199,8 @@
         <div class="panel glass s2-module-card">
           <div class="panel-heading">
             <div>
-              <div class="section-kicker">MODULE A — ZERO-HARDWARE PREEMPTION</div>
-              <h3>Emergency Green Corridor &amp; Queue-Flush Engine</h3>
+              <div class="section-kicker">MODULE A — LOW-COST DUAL-KEY PREEMPTION</div>
+              <h3>Emergency Green Corridor &amp; Queue-Discharge Timing</h3>
             </div>
             <span class="status-tag in-progress" id="siren-status-badge">Acoustic Standby</span>
           </div>
@@ -229,6 +229,19 @@
             </div>
           </div>
 
+          <div class="range-panel glass" id="siren-range-panel">
+            <div class="range-panel-heading"><b>Two-stage ambulance approach</b><span>Mic estimate: <strong id="mic-range-result">—</strong></span></div>
+            <p>A network warning arms the junction and starts queue-clear preparation, but never grants green. Green requires a confirmed siren pattern within the estimated microphone range.</p>
+            <div class="range-inputs">
+              <label>Siren SPL at reference (dB)<input id="range-spl" type="number" step="1"></label>
+              <label>Reference distance (m)<input id="range-ref-dist" type="number" min="0.1" step="0.1"></label>
+              <label>Traffic noise (dB)<input id="range-noise" type="number" step="1"></label>
+              <label>Minimum SNR (dB)<input id="range-min-snr" type="number" step="1"></label>
+            </div>
+            <div class="range-table-wrap"><table class="range-table"><thead><tr><th>Distance</th><th>Estimated SPL</th><th>SNR</th><th>Detectable</th></tr></thead><tbody id="range-table-body"></tbody></table></div>
+            <small>Estimate, free-field, no buildings or reflections. Try higher traffic noise for peak traffic and lower noise at night. Validate all assumptions with field recordings.</small>
+          </div>
+
           <div class="siren-test-panel glass" id="siren-test-panel" hidden>
             <div class="siren-test-heading">
               <div><b>Test signals</b><small>Dev only · generated and analyzed in this browser</small></div>
@@ -241,6 +254,43 @@
               <button data-siren-test="horn">Steady horn</button>
               <button data-siren-test="noise">White noise</button>
               <button data-siren-test="chord">Two-tone chord</button>
+            </div>
+            <div class="direction-test-buttons">
+              <button type="button" data-direction-test="approach">Synthetic approach</button>
+              <button type="button" data-direction-test="recede">Synthetic recede</button>
+              <button type="button" data-direction-test="constant">Constant level</button>
+              <button type="button" id="direction-self-check">Direction self-check</button>
+            </div>
+            <div class="approach-simulator">
+              <b>Ambulance approach simulator</b>
+              <label>Distance <input id="ambulance-sim-distance" type="range" min="0" max="600" value="600"><strong id="ambulance-sim-distance-value">600 m</strong></label>
+              <label>Speed (km/h) <input id="ambulance-sim-speed" type="number" min="1" max="160" value="65"></label>
+              <label>Simulated network heading toward junction (degrees; 0=N, 90=E)<input id="ambulance-sim-heading" type="number" min="0" max="359" value="10"></label>
+              <div>ETA <strong id="ambulance-sim-eta">33.2 s</strong> · State <strong id="approach-state">IDLE</strong></div>
+              <div class="approach-timeline"><span>IDLE: outside warning radius</span><span>ARMED: <b id="approach-armed-at">—</b></span><span>CONFIRMED: <b id="approach-confirmed-at">—</b></span></div>
+              <small id="approach-queue-countdown">Waiting for network warning.</small>
+              <div class="approach-actions"><button type="button" id="ambulance-sim-run">Run approach 600 m → 0</button><button type="button" id="ambulance-sim-siren">Simulate siren at mic range</button></div>
+              <div class="direction-readout">
+                <span>Slope <b id="direction-slope">0.00 dB/s</b></span>
+                <span>R² <b id="direction-r2">0.00</b></span>
+                <span>Trend <b id="direction-state">UNKNOWN</b></span>
+                <span>Doppler <b id="direction-doppler">—</b></span>
+                <span>Arm <b id="direction-arm">Unknown</b></span>
+                <span>Stereo hint <b id="direction-stereo">—</b></span>
+                <span class="direction-gate-result">Gate <b id="direction-gate">Denied · Trend uncertain</b></span>
+              </div>
+            <div class="dual-key-tools">
+              <div><b>Dual-key vehicle gate</b> · <a href="/ambulance" target="_blank" rel="noopener">Open 108 Driver App</a></div>
+              <label>Verified vehicle <select id="verified-vehicle"><option value="">No vehicle selected</option></select></label>
+              <label>Admin token <input id="admin-token" type="password" autocomplete="off" placeholder="ADMIN_TOKEN"></label>
+              <button type="button" id="vehicle-refresh">Refresh vehicles &amp; audit</button>
+              <p id="dual-key-status" role="status">A confirmed siren without a verified vehicle is WATCH only.</p>
+              <div class="range-table-wrap"><table class="range-table"><thead><tr><th>Vehicle</th><th>Status</th><th>Last report</th><th>Admin</th></tr></thead><tbody id="vehicle-registry-body"></tbody></table></div>
+              <h4>Try to break it</h4>
+              <div class="siren-test-buttons"><button data-attack="recorded">Recorded siren, no token</button><button data-attack="replay">Replay old token</button><button data-attack="tamper">Tampered report</button><button data-attack="revoked">Revoked token</button><button data-attack="teleport">Teleport 5 km</button><button data-attack="valid">Valid token + siren</button><button id="attack-self-check">Run attack self-check</button></div>
+              <div class="range-panel-heading"><b>Audit hash chain</b><strong id="audit-chain-status">Loading…</strong></div>
+              <div class="range-table-wrap"><table class="range-table"><thead><tr><th>Decision</th><th>Reason</th><th>Vehicle</th><th>Junction</th><th>Time</th></tr></thead><tbody id="audit-log-body"></tbody></table></div>
+            </div>
             </div>
             <small id="siren-test-playing">Open this page with ?dev=1 to show developer tools.</small>
           </div>
@@ -284,18 +334,18 @@
 
           <!-- Live Math Box -->
           <div class="math-box glass" id="tflush-math-box">
-            <div class="math-title">GREENSHIELDS QUEUE-FLUSH HYDRODYNAMIC MODEL</div>
-            <div class="formula-line">
-              T<sub>flush</sub> = 3.5 + (Cars × 6.5 / 6.5) + (Trucks × 13.5 / 4.0) + (Bikes × 3.2 / 8.0)
-            </div>
+            <div class="math-title">QUEUE DISCHARGE (saturation flow)</div>
+            <div class="formula-line" id="queue-formula">3.5 + 2.0 + (24*1.0 + 8*2.2 + 35*0.5 + 0*1.2) * 2.0 / 2 = 64.6 s</div>
             <div class="math-eval">
-              <span>Required Flush Time: <strong id="calc-tflush">36.4s</strong></span>
-              <span>Ambulance ETA: <strong id="calc-eta">24.9s</strong></span>
-              <span class="margin-status safe" id="calc-margin">Status: Preempt Clear Margin OK</span>
+              <span>Nominal discharge time: <strong id="calc-tflush">64.6s</strong> (<strong id="calc-tflush-range">48.2–93.9s</strong>)</span>
+              <span>Ambulance ETA: <strong id="calc-eta">24.9s</strong> <small id="calc-eta-source">manual estimate</small></span>
+              <span class="margin-status danger" id="calc-margin">TOO LATE: queue will not clear in time</span>
             </div>
+            <small id="queue-breakdown">Reaction 3.5s · start-up 2.0s · cars 24.0s · heavy vehicles 17.6s · two-wheelers 17.5s · auto-rickshaws 0.0s · 2 lanes</small>
+            <button class="secondary-btn" id="queue-self-check" type="button">Run queue model self-check</button>
           </div>
 
-          <button class="danger-action-btn" id="btn-trigger-preempt">🚑 Trigger Emergency Green Wave Override</button>
+          <button class="danger-action-btn" id="btn-trigger-preempt" title="Requires close-range confirmed siren detection">🚑 Green requires close-range siren confirmation</button>
         </div>
 
         <!-- Right Column: Module B -->
@@ -419,13 +469,13 @@
     <div class="constraint-card glass">
       <div class="constraint-head">
         <span class="constraint-badge">S2 CONSTRAINT #2</span>
-        <b>Greenshields Hydrodynamic Model &amp; Crowd Telematics Assumptions</b>
+        <b>Queue Discharge Model &amp; Crowd Telematics Assumptions</b>
       </div>
-      <p><strong>Greenshields Queue-Flush Equation:</strong></p>
+      <p><strong>Saturation-flow queue-discharge equation:</strong></p>
       <div class="math-callout">
-        <code>T_flush = 3.5 + (Cars × 6.5 / 6.5) + (Trucks × 13.5 / 4.0) + (Bikes × 3.2 / 8.0)</code>
+        <code>T_flush = t_react + t_startup + (Σ count_i × PCU_i) × h / effective_lanes</code>
       </div>
-      <p>Assumes startup lost time t<sub>0</sub> = 3.5s, realistic vehicle lengths, and following headway gaps. Guarantees queue clearance before ambulance arrival (ETA = d / v).</p>
+      <p>Greenshields describes speed-density relationships for moving traffic, so it was replaced with a stopped-queue discharge estimate. Current assumptions: reaction 3.5 s, start-up lost time 2.0 s, nominal saturation headway 2.0 s/PCU (about 1800 PCU/hr/lane), and 2 effective lanes per arm. PCU factors: car 1.0, two-wheeler 0.5, heavy vehicle 2.2, auto-rickshaw 1.2. Estimates include h=1.7–2.6 s/PCU and ±15% PCU uncertainty. These values require calibration; verify PCU factors against IRC:106 before presenting. The high estimate is used for the timing check; it does not guarantee real-world queue clearance.</p>
       <p><strong>Crowd-Telematics Inertial Filter:</strong> Filters configured vehicle speeds below 15 km/h or phone jerk below 15 m/s³. Three qualifying phone hits create a demo PWD work-order entry.</p>
     </div>
   </div>

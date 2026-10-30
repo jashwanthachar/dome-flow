@@ -2,7 +2,7 @@
 
 DOME Flow is a Flask-based traffic management demonstration for the NH-206 Gubbi–Tumakuru corridor, with a Bengaluru scenario for comparison. It provides a responsive dashboard for traffic incidents and analytics, plus two feature demonstrations:
 
-- **Emergency preemption:** browser microphone frequency analysis, a synthetic siren fallback, queue-clearance timing, and a simulated green-wave update.
+- **Emergency preemption demo:** a simulated network warning arms queue-clear preparation, then close-range browser microphone pattern confirmation can request a simulated green wave. The acoustic range is an estimate, not a measured capability.
 - **Road shock reporting:** phone motion input or a manual simulator, with a three-hit counter that creates a demo blackspot incident and work order.
 
 This is a simulation. It does not connect to real traffic signals or municipal work-order systems. The backend stores demo state in memory, so state resets when the server process restarts.
@@ -30,10 +30,23 @@ The service is configured with one Gunicorn worker so requests share the same in
 
 ## Suggested feature demo
 
-1. Open **S2 Edge AI & Preemption** and allow microphone access. Play a siren recording near the device, or use the synthetic siren fallback if the microphone is unavailable. The detector searches 500–1800 Hz and looks for repeated wail, yelp, or hi-lo patterns; it is still a demo detector, not a validated emergency-vehicle classifier.
-2. Show the live queue and ETA calculation, then trigger the emergency green wave. The dashboard updates the target and downstream junctions and records an incident.
-3. On the phone, enable the accelerometer and shake the phone firmly to submit qualifying motion events. For a predictable presentation, use **Simulate Commuter Pothole Shock** three times instead. The third qualifying request creates a demo incident and work order.
-4. Show the resulting changes in Overview, Road Management, and Analytics.
+1. In **S2 Edge AI & Preemption**, inspect the free-field range estimate and edit its sound/noise assumptions. The starting assumptions have not been validated with field recordings; the estimate excludes buildings and reflections.
+2. Open the page with `?dev=1` and run **Ambulance approach simulator**. At the network warning distance, the simulated warning changes the state to ARMED and begins queue-clear preparation; no green is granted. A close-range siren must be confirmed, its RMS loudness must show an approaching trend with sufficient R-squared, and the simulated heading must match a configured junction arm before green is requested.
+3. Use the **Synthetic approach**, **Synthetic recede**, and **Constant level** buttons to inspect loudness slope, R-squared, Doppler supporting evidence, arm match, and gate reason. **Direction self-check** prints PASS/FAIL for approaching with the correct arm, receding, constant level, and approaching from an unmatched heading. These checks exercise the browser-side gate; they do not authenticate a real ambulance.
+4. If a preemption is active and the trend remains receding for two seconds, the demo releases through amber and all-red clearance before restoring the prior junction states. The siren detector searches 500–1800 Hz for repeated wail, yelp, or hi-lo patterns; it is not a validated emergency-vehicle classifier.
+5. For live microphone testing, allow microphone access and play a siren recording near the device. Test audio stays in the browser; no raw audio is sent to Flask. Stereo left/right hints are shown only when the input exposes two channels. The deployment has no real ambulance network feed, so heading and approach messages are simulated.
+6. On the phone, enable the accelerometer and shake the phone firmly to submit qualifying motion events. For a predictable presentation, use **Simulate Commuter Pothole Shock** three times instead. The third qualifying request creates a demo incident and work order.
+7. Show the resulting changes in Overview, Road Management, and Analytics.
+
+## Queue discharge model
+
+The earlier Greenshields calculation was removed because Greenshields describes speed-density behaviour for moving traffic, not the discharge of a stopped queue at a signal. The replacement uses the saturation-flow estimate:
+
+`T_flush = t_react + t_startup + (sum(count_i × PCU_i)) × h / effective_lanes`
+
+Current assumptions are reaction delay 3.5 s, start-up lost time 2.0 s, nominal headway 2.0 s per PCU (about 1800 PCU/hr/lane), and 2 effective lanes per approach arm. PCU factors are car 1.0, two-wheeler 0.5, heavy truck/bus 2.2, and auto-rickshaw 1.2. The displayed LOW estimate uses h=1.7 s/PCU and PCU total reduced by 15%; HIGH uses h=2.6 s/PCU and PCU total increased by 15%. The HIGH value is used for the timing check: `green_start_in = verified_ETA - T_flush_high`. If negative, the request is denied with **TOO LATE: queue will not clear in time**; if positive, the browser waits until the calculated start window and the server rechecks the verified report before allowing green. The one-second early-start buffer is also an assumption.
+
+All these inputs are assumptions pending field calibration. In particular, verify the PCU factors against the IRC:106 table before presenting; replace them if the applicable table or field observations differ. The estimate is not a guarantee of queue clearance. Use **Run queue model self-check** on the dashboard and inspect the browser console for PASS/FAIL values.
 
 The three-hit demonstration counts qualifying requests; it does not validate that hits came from three separate phones or a real-world spatial cluster.
 
@@ -49,3 +62,26 @@ The three-hit demonstration counts qualifying requests; it does not validate tha
 ## Siren detector self-check
 
 Open the app with `?dev=1` appended to its URL, go to **S2 Edge AI & Preemption**, and select **Run self-check**. Open the browser developer console to see PASS/FAIL results for the six generated signals. Stop the live microphone first. Test audio is generated and analyzed in the browser; no audio is sent to Flask.
+
+## Security model
+
+The junction hardware assumption is one microphone plus a small edge device. This is a low-cost design target, not a measured bill of materials or a quote. The dual-key gate combines an approved ambulance's fresh signed position token with a confirmed, approaching siren at close range. Flask verifies signatures, timestamps, replay nonces, report rate, and plausible movement. It derives distance, ETA, heading arm, and approach from verified reports. A siren without a verified vehicle is logged as WATCH; a vehicle without local siren confirmation is only ARMED. Each decision is recorded in the hash-chained audit log. The browser never uploads raw microphone audio to Flask.
+
+For local demo use, set an `ADMIN_TOKEN` environment variable before starting Flask. On Windows PowerShell: `$env:ADMIN_TOKEN = "choose-a-demo-token"`; then run `python app.py`. On Render, add `ADMIN_TOKEN` under the service environment variables. Open `/?dev=1`, enter the same token in the developer panel, and approve an enrolled vehicle. Open `/ambulance` to enroll and start signed position reports.
+
+A stolen phone with an approved key can still sign valid reports. Revocation, rate limits, and the audit log are the prototype mitigations. A production version would use hardware-backed keys, a government PKI, and a controller-side check. This project demonstrates the protocol; it is not a production traffic-signal security system.
+
+The browser reports the siren detector result to Flask; Flask does not independently verify the acoustic event because raw audio stays local. A person who controls an approved phone and can forge requests from the trusted dashboard/browser could still claim a siren was confirmed. A production deployment must run the detector in a trusted junction unit and have the signal controller independently verify the authenticated preemption request.
+
+The in-memory vehicle registry, replay cache, and hash-chained audit log reset when the service restarts. The dev attack panel (`/?dev=1`) runs six simulated cases: unpaired siren, replay, tampering, revoked key, teleport, and valid token plus siren. These tests exercise the demo protocol and do not substitute for field or security testing.
+
+## Risk & Misuse
+
+- **Recorded siren near a junction:** without a fresh signed token from an approved vehicle, the event is WATCH only and cannot grant green. This blocks sound-only spoofing in the demo. The detector can still make acoustic classification errors, and the browser-reported result is not independently authenticated by Flask.
+- **Replayed token or report:** the server verifies the signature, rejects reports older than 10 seconds or from the future, and rejects a nonce reused within the replay window. The nonce cache is in memory, so a service restart clears it.
+- **Stolen approved device:** whoever controls the device can use its approved key to sign reports until the administrator revokes it. Per-vehicle rate limits and the audit log help detect or limit abuse; they do not prevent use before revocation.
+- **Cross-traffic harm:** the dashboard compares verified ETA with the conservative HIGH saturation-flow discharge estimate and displays **TOO LATE** when the queue cannot clear in time. This is a timing check, not a validated minimum-harm controller interlock. The existing release sequence remains amber, then all-red, before restoring prior signal states; receding detection starts release after its configured delay. No independent maximum green-hold timer is implemented, so the demo must not control real signals.
+
+## Optional future upgrade (not required)
+
+The low-cost hardware estimate assumes only a microphone and small edge device; cameras or radar are not required and are not used for ambulance verification. They could be evaluated only as optional future sensing. Verification remains the signed ambulance token plus confirmed approaching siren, with the audit log providing accountability.
