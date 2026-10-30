@@ -455,7 +455,7 @@ def trigger_preempt():
 @app.post("/api/telematics/shock")
 def telematics_shock():
     """
-    Ingests inertial probe telemetry for vertical jerk / road surface quality:
+    Ingests inertial probe telemetry for motion jerk / road surface quality:
     - Filters low-speed / low-intensity noise (<15 km/h or <15 m/s³)
     - Aggregates cluster counts per corridor
     - On 3x hits, automatically generates a verified pothole blackspot and PWD work order
@@ -464,18 +464,18 @@ def telematics_shock():
     corridor = payload.get("corridor") or active_scenario
     source = payload.get("source", "simulator")
     probe_id = str(payload.get("probe_id", ""))
-    z_jerk = float(payload.get("z_jerk", 0.0))
+    jerk_mps3 = float(payload.get("jerk_mps3", payload.get("z_jerk", 0.0)))
     speed_kmh = float(payload.get("speed_kmh", 0.0))
     lat = float(payload.get("lat", 13.3120))
     lng = float(payload.get("lng", 76.9450))
 
-    # Noise filter: ignore if speed < 15 km/h or z_jerk < 15 m/s³
-    if speed_kmh < 15.0 or z_jerk < 15.0:
+    # Noise filter: ignore if speed < 15 km/h or phone jerk < 15 m/s³
+    if speed_kmh < 15.0 or jerk_mps3 < 15.0:
         return jsonify({
             "status": "filtered_noise",
-            "reason": "Speed or vertical jerk threshold not met (< 15 km/h or < 15 m/s³)",
+            "reason": "Speed or motion jerk threshold not met (< 15 km/h or < 15 m/s³)",
             "speed_kmh": speed_kmh,
-            "z_jerk": z_jerk
+            "jerk_mps3": jerk_mps3
         }), 200
 
     with lock:
@@ -509,7 +509,7 @@ def telematics_shock():
         new_incident = {
             "id": f"BS-{len(incidents) + 201}",
             "type": "Roadworks",
-            "title": "Verified Pothole Blackspot (3x Inertial Cluster)",
+            "title": "Verified Phone Shock Blackspot (3 qualifying hits)",
             "road": f"NH-206 · Gubbi-Nittur Highway Segment" if corridor == "nh206" else "Outer Ring Road Telematics Sector",
             "area": "Gubbi-Nittur Km 18.2" if corridor == "nh206" else "Marathahalli East",
             "lat": lat,
@@ -519,7 +519,7 @@ def telematics_shock():
             "reported": india_now().strftime("%I:%M:%S %p"),
             "status": "Reported",
             "delay": 14,
-            "detail": f"Triangulated inertial probe cluster: 3 independent probe hits registered severe vertical shock (z-jerk: {round(z_jerk, 1)} m/s³ @ {round(speed_kmh, 1)} km/h). PWD work order automatically generated.",
+            "detail": f"Phone motion jerk: {round(jerk_mps3, 1)} m/s³ at {round(speed_kmh, 1)} km/h; three qualifying hits verified this demo incident.",
             "detour": "Caution advised. Highway single lane diversion marked.",
             "impact": "High",
             "corridor": corridor

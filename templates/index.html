@@ -283,11 +283,11 @@
               <div class="section-kicker">MODULE B — ZERO-TOUCH CROWD TELEMATICS</div>
               <h3>Pothole Blackspot &amp; Inertial Probe</h3>
             </div>
-            <span class="status-tag resolved">3-Hit Clustering</span>
+            <span class="status-tag resolved">3-Hit Shock Count</span>
           </div>
 
           <div class="explanation-pill">
-            <span>ⓘ Spatial noise filter: Speed &ge; 15 km/h &amp; Z-Jerk &ge; 15 m/s³ prevents false positives from speed bumps</span>
+            <span>ⓘ Motion noise filter: Speed &ge; 15 km/h &amp; phone jerk &ge; 15 m/s³ prevents false positives from speed bumps</span>
           </div>
 
           <div class="s2-form-grid">
@@ -302,7 +302,7 @@
             </div>
             <div class="form-row-2">
               <div class="form-group">
-                <label for="shock-jerk">Z-Axis Jerk: <b id="jerk-val">24.5 m/s³</b></label>
+                <label for="shock-jerk">Phone Motion Jerk: <b id="jerk-val">24.5 m/s³</b></label>
                 <input type="range" id="shock-jerk" min="5" max="45" step="0.5" value="24.5">
               </div>
               <div class="form-group">
@@ -320,11 +320,11 @@
             </div>
             <div class="inertial-readings">
               <div class="reading">
-                <small>VERTICAL ACCEL / JERK</small>
+                <small>PHONE MOTION JERK</small>
                 <strong id="live-jerk-readout">24.5 <small>m/s³</small></strong>
               </div>
               <div class="reading">
-                <small>PROBE GPS SPEED</small>
+                <small>DEMO VEHICLE SPEED</small>
                 <strong id="live-speed-readout">48 <small>km/h</small></strong>
               </div>
             </div>
@@ -332,7 +332,7 @@
             <!-- 3-Hit Cluster Progress Bar -->
             <div class="cluster-tracker">
               <div class="cluster-top">
-                <small>3-HIT SPATIAL CLUSTER STATUS</small>
+                <small>3-HIT PHONE SHOCK COUNT</small>
                 <span id="cluster-status-text">0 / 3 Hits — Listening for Commuter Shocks</span>
               </div>
               <div class="cluster-progress-wrap">
@@ -349,9 +349,9 @@
           <div class="pwd-auto-order glass">
             <div class="pwd-header">
               <span class="pwd-badge">PWD AUTO-DISPATCH ACTIVE</span>
-              <small>3x Cluster = Verified Pothole Incident</small>
+              <small>3 qualifying phone hits = Demo pothole incident</small>
             </div>
-            <p>Automated municipal work-order dispatch triggers on the 3rd verified spatial shock hit, prioritizing road repair crews without manual citizen reports.</p>
+            <p>The third qualifying phone motion hit creates a work-order entry in this demo. It does not verify separate devices or a real road location.</p>
           </div>
         </div>
       </div>
@@ -404,7 +404,7 @@
         <code>T_flush = 3.5 + (Cars × 6.5 / 6.5) + (Trucks × 13.5 / 4.0) + (Bikes × 3.2 / 8.0)</code>
       </div>
       <p>Assumes startup lost time t<sub>0</sub> = 3.5s, realistic vehicle lengths, and following headway gaps. Guarantees queue clearance before ambulance arrival (ETA = d / v).</p>
-      <p><strong>Crowd-Telematics Inertial Filter:</strong> Discards vertical jerks where Speed &lt; 15 km/h or Z-Jerk &lt; 15 m/s³ to eliminate speed bumps, rumblers, and braking vibrations. A 3-hit spatial cluster triggers automated PWD work orders.</p>
+      <p><strong>Crowd-Telematics Inertial Filter:</strong> Filters configured vehicle speeds below 15 km/h or phone jerk below 15 m/s³. Three qualifying phone hits create a demo PWD work-order entry.</p>
     </div>
   </div>
 </div>

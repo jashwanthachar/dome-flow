@@ -672,7 +672,7 @@ async function triggerSimShock(source = "simulator") {
       method: "POST",
       body: JSON.stringify({
         corridor,
-        z_jerk,
+        jerk_mps3: z_jerk,
         speed_kmh,
         source,
         probe_id: source === "motion" ? motionProbeId : undefined
@@ -684,8 +684,8 @@ async function triggerSimShock(source = "simulator") {
     } else if (res.status === "clustering") {
       const pct = Math.round((res.hits / 3) * 100);
       if ($("#cluster-progress-bar")) $("#cluster-progress-bar").style.width = `${pct}%`;
-      if ($("#cluster-status-text")) $("#cluster-status-text").textContent = `${res.hits} / 3 Hits — Spatial Cluster Accumulating`;
-      toast(`💥 Shock Registered (${res.hits}/3) — Spatial Cluster Accumulating`);
+      if ($("#cluster-status-text")) $("#cluster-status-text").textContent = `${res.hits} / 3 Hits — Shock count accumulating`;
+      toast(`💥 Shock Registered (${res.hits}/3) — Shock count accumulating`);
     } else if (res.status === "verified_blackspot") {
       if ($("#cluster-progress-bar")) $("#cluster-progress-bar").style.width = "100%";
       if ($("#cluster-status-text")) $("#cluster-status-text").textContent = "3 / 3 Verified! PWD Work Order Dispatched";
@@ -699,7 +699,7 @@ async function triggerSimShock(source = "simulator") {
 }
 
 let isMotionActive = false;
-let lastAcc = { x: 0, y: 0, z: 9.8 };
+let lastAcc = null;
 let lastMotionTime = Date.now();
 let motionHitArmed = true;
 let motionLowSince = 0;
@@ -715,15 +715,31 @@ const motionProbeId = (() => {
 })();
 
 function handleMotion(e) {
-  const acc = e.accelerationIncludingGravity || e.acceleration;
+  const directAcc = e.acceleration;
+  const gravityAcc = e.accelerationIncludingGravity;
+  const directHasValues = directAcc && [directAcc.x, directAcc.y, directAcc.z].some(Number.isFinite);
+  const acc = directHasValues ? directAcc : gravityAcc;
   if (!acc) return;
   const now = Date.now();
   const dt = (now - lastMotionTime) / 1000;
   if (dt < 0.08) return;
 
-  const z = acc.z !== null ? acc.z : 9.8;
-  const jerk = Math.abs((z - lastAcc.z) / Math.max(dt, 0.05));
-  lastAcc = { x: acc.x, y: acc.y, z };
+  const currentAcc = {
+    x: Number.isFinite(acc.x) ? acc.x : 0,
+    y: Number.isFinite(acc.y) ? acc.y : 0,
+    z: Number.isFinite(acc.z) ? acc.z : 0
+  };
+  if (!lastAcc) {
+    lastAcc = currentAcc;
+    lastMotionTime = now;
+    return;
+  }
+  const jerk = Math.hypot(
+    currentAcc.x - lastAcc.x,
+    currentAcc.y - lastAcc.y,
+    currentAcc.z - lastAcc.z
+  ) / Math.max(dt, 0.05);
+  lastAcc = currentAcc;
   lastMotionTime = now;
 
   const jerkVal = Math.min(50, Math.round(jerk * 10) / 10);
@@ -738,10 +754,14 @@ function handleMotion(e) {
     motionLowSince = 0;
   }
 
-  if (jerkVal >= 16 && motionHitArmed && now - lastMotionHitTime >= 3000) {
+  if (jerkVal >= 16 && motionHitArmed) {
     motionHitArmed = false;
-    lastMotionHitTime = now;
-    triggerSimShock("motion");
+    if (now - lastMotionHitTime >= 3000) {
+      lastMotionHitTime = now;
+      triggerSimShock("motion");
+    } else {
+      toast("Wait 3 seconds between phone shock hits");
+    }
   }
 }
 
@@ -752,6 +772,10 @@ function bindMotion() {
     if ($("#btn-motion-sensor")) $("#btn-motion-sensor").innerHTML = "📱 Enable Live Phone Accelerometer";
     toast("Motion sensor disabled");
   } else {
+    lastAcc = null;
+    lastMotionTime = Date.now();
+    motionHitArmed = true;
+    motionLowSince = 0;
     window.addEventListener("devicemotion", handleMotion);
     isMotionActive = true;
     if ($("#btn-motion-sensor")) $("#btn-motion-sensor").innerHTML = "📱 Motion Sensor Active (Shake to Shock)";
