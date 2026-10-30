@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0b1424">
+  <title>DOME Flow — S2 Smart Mobility &amp; Preemption</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar glass">
+    <div class="brand"><div class="brand-mark">D</div><div><b>DOME <span>Flow</span></b><small>SMART MOBILITY</small></div></div>
+    <div class="side-label">WORKSPACE</div>
+    <button class="nav-link active" data-view="overview"><span>◫</span> Overview</button>
+    <button class="nav-link" data-view="traffic"><span>⌁</span> Traffic &amp; incidents</button>
+    <button class="nav-link" data-view="manage"><span>▤</span> Road management</button>
+    <button class="nav-link" data-view="analytics"><span>▥</span> Analytics</button>
+    <button class="nav-link s2-nav-highlight" data-view="s2-command"><span>🚨</span> S2 Edge AI &amp; Preemption</button>
+    <div class="sidebar-bottom"><div class="operator"><div class="avatar">OP</div><div><b>City operator</b><small>Demo workspace</small></div><span class="online-dot"></span></div></div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow" id="corridor-breadcrumb">SMART MOBILITY / NH-206: CIT GUBBI – TUMAKURU CORRIDOR (S2)</div>
+        <h1 id="pageTitle">Good morning, operator <span>✦</span></h1>
+      </div>
+      <div class="top-actions">
+        <button class="top-action-btn" id="btn-switch-corridor" title="Switch corridor scenario">Switch: NH-206 ⇄ Bengaluru</button>
+        <button class="top-action-btn" id="btn-sim-tick" title="Simulate real-time traffic pulse">⚡ Sim Tick</button>
+        <button class="top-action-btn info-btn" id="btn-s2-info" title="View S2 math and constraints">S2 Math &amp; Constraints</button>
+        <span class="demo-pill"><i></i> DEMO DATA</span>
+        <button class="icon-btn" id="refreshBtn" title="Refresh demo data">↻</button>
+        <div class="date-chip">FRI, 30 OCT <b>08:45</b></div>
+      </div>
+    </header>
+
+    <!-- 1. OVERVIEW VIEW -->
+    <section class="view active" id="overview">
+      <div class="hero-row">
+        <div>
+          <div class="section-kicker">LIVE-STYLE CITY PICTURE</div>
+          <h2>Move through the corridor<br><em>with zero-delay clarity.</em></h2>
+          <p class="muted">A synchronized view of highway conditions, acoustic preemption waves, and road quality.</p>
+        </div>
+        <div class="hero-stat glass"><span class="stat-icon">↗</span><div><small>NETWORK FLOW</small><strong>72<span>%</span></strong><small class="positive">↑ 4% vs. previous hour</small></div></div>
+      </div>
+
+      <!-- S2 Live Impact Strip -->
+      <div class="s2-impact-strip glass">
+        <div class="impact-pill">
+          <span class="impact-icon emerald">⏱</span>
+          <div><small>GOLDEN HOUR SAVED</small><strong id="kpi-golden-hour">145s</strong></div>
+        </div>
+        <div class="impact-pill">
+          <span class="impact-icon blue">⛽</span>
+          <div><small>FUEL SAVED</small><strong id="kpi-fuel-saved">48.5 L</strong></div>
+        </div>
+        <div class="impact-pill">
+          <span class="impact-icon cyan">🌊</span>
+          <div><small>ACTIVE GREEN WAVES</small><strong id="kpi-green-waves">0</strong></div>
+        </div>
+        <div class="impact-pill">
+          <span class="impact-icon amber">⚠</span>
+          <div><small>VERIFIED BLACKSPOTS</small><strong id="kpi-blackspots">1</strong></div>
+        </div>
+        <div class="impact-pill">
+          <span class="impact-icon purple">📋</span>
+          <div><small>PWD WORK ORDERS</small><strong id="kpi-pwd-orders">1</strong></div>
+        </div>
+      </div>
+
+      <!-- Legacy Mobility Metrics Grid -->
+      <div class="metrics-grid">
+        <div class="metric glass"><div class="metric-head"><span>Active issues</span><span class="metric-icon amber">!</span></div><strong id="activeCount">3</strong><small><b class="amber-text">2 need attention</b> across monitored corridors</small></div>
+        <div class="metric glass"><div class="metric-head"><span>High severity</span><span class="metric-icon red">↗</span></div><strong id="highCount">1</strong><small>Priority response required</small></div>
+        <div class="metric glass"><div class="metric-head"><span>Avg. extra travel</span><span class="metric-icon blue">◷</span></div><strong>11 <small>min</small></strong><small>Estimated network-wide delay</small></div>
+        <div class="metric glass"><div class="metric-head"><span>Response time</span><span class="metric-icon green">✓</span></div><strong>6 <small>min</small></strong><small><b class="positive">On target</b> · sample metric</small></div>
+      </div>
+
+      <!-- 4-Junction Live Queue & Signal Status Grid -->
+      <div class="junctions-container">
+        <div class="section-kicker">NH-206 REAL-TIME CORRIDOR TELEMETRY · 4 MONITORED JUNCTIONS</div>
+        <div class="junctions-grid" id="junctions-grid">
+          <div class="junction-card glass" data-junction="J1">
+            <div class="junction-header">
+              <div class="j-info"><b class="j-id">J1</b> · <span class="j-name">CIT Campus Gate (NH-206)</span></div>
+              <span class="signal-badge green">GREEN</span>
+            </div>
+            <div class="junction-queues">
+              <span title="Queued Cars">🚗 <b class="q-cars">12</b></span>
+              <span title="Queued Trucks">🚚 <b class="q-trucks">4</b></span>
+              <span title="Queued Bikes">🛵 <b class="q-bikes">18</b></span>
+            </div>
+            <div class="junction-flush"><small>GREENSHIELDS QUEUE-FLUSH</small> T_flush: <strong class="q-flush">36.2s</strong></div>
+          </div>
+          <div class="junction-card glass" data-junction="J2">
+            <div class="junction-header">
+              <div class="j-info"><b class="j-id">J2</b> · <span class="j-name">Gubbi Town Cross Junction</span></div>
+              <span class="signal-badge red">RED</span>
+            </div>
+            <div class="junction-queues">
+              <span title="Queued Cars">🚗 <b class="q-cars">24</b></span>
+              <span title="Queued Trucks">🚚 <b class="q-trucks">8</b></span>
+              <span title="Queued Bikes">🛵 <b class="q-bikes">35</b></span>
+            </div>
+            <div class="junction-flush"><small>GREENSHIELDS QUEUE-FLUSH</small> T_flush: <strong class="q-flush">68.5s</strong></div>
+          </div>
+          <div class="junction-card glass" data-junction="J3">
+            <div class="junction-header">
+              <div class="j-info"><b class="j-id">J3</b> · <span class="j-name">Nittur Highway Market Bottleneck</span></div>
+              <span class="signal-badge red">RED</span>
+            </div>
+            <div class="junction-queues">
+              <span title="Queued Cars">🚗 <b class="q-cars">19</b></span>
+              <span title="Queued Trucks">🚚 <b class="q-trucks">7</b></span>
+              <span title="Queued Bikes">🛵 <b class="q-bikes">26</b></span>
+            </div>
+            <div class="junction-flush"><small>GREENSHIELDS QUEUE-FLUSH</small> T_flush: <strong class="q-flush">56.5s</strong></div>
+          </div>
+          <div class="junction-card glass" data-junction="J4">
+            <div class="junction-header">
+              <div class="j-info"><b class="j-id">J4</b> · <span class="j-name">Batawadi – Tumakuru Entry Junction</span></div>
+              <span class="signal-badge green">GREEN</span>
+            </div>
+            <div class="junction-queues">
+              <span title="Queued Cars">🚗 <b class="q-cars">28</b></span>
+              <span title="Queued Trucks">🚚 <b class="q-trucks">9</b></span>
+              <span title="Queued Bikes">🛵 <b class="q-bikes">42</b></span>
+            </div>
+            <div class="junction-flush"><small>GREENSHIELDS QUEUE-FLUSH</small> T_flush: <strong class="q-flush">78.7s</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Map & Priority Incidents Grid -->
+      <div class="content-grid">
+        <div class="panel map-panel glass">
+          <div class="panel-heading"><div><div class="section-kicker">NETWORK VIEW</div><h3>Traffic flow map &amp; digital twin</h3></div><div class="map-legend"><span><i class="dot green"></i> Flowing</span><span><i class="dot amber"></i> Slow</span><span><i class="dot red"></i> Incident</span><span><i class="dot emerald-pulse"></i> Green Wave</span></div></div>
+          <div class="map-wrap">
+            <svg class="city-map" viewBox="0 0 760 430" role="img" aria-label="Stylized Bengaluru and NH-206 road map with traffic conditions">
+              <defs><pattern id="grid" width="34" height="34" patternUnits="userSpaceOnUse"><path d="M 34 0 L 0 0 0 34" fill="none" stroke="#a7b7c8" stroke-opacity=".09" stroke-width="1"/></pattern></defs>
+              <rect width="760" height="430" fill="url(#grid)"/>
+              <g class="blocks"><path d="M20 30h125v72H20zM178 28h105v88H178zM325 22h110v76H325zM490 22h105v90H490zM630 20h105v90H630zM25 150h115v80H25zM170 145h115v92H170zM325 145h120v80H325zM490 150h105v80H490zM630 150h100v95H630zM25 285h115v100H25zM175 285h110v100H175zM330 275h110v105H330zM490 285h100v95H490zM630 290h105v95H630z"/></g>
+              <g class="roads"><path d="M-10 120 C140 130 200 110 330 135 S580 160 780 120" class="road"/><path d="M-10 255 C130 220 260 260 390 240 S610 215 780 260" class="road"/><path d="M95 -10 C130 100 105 190 150 440" class="road"/><path d="M300 -10 C270 100 340 210 315 440" class="road"/><path d="M510 -10 C480 100 535 230 500 440" class="road"/><path d="M680 -10 C650 110 700 250 665 440" class="road"/><path d="M-10 365 C160 330 250 360 400 340 S630 350 780 320" class="road"/></g>
+              <!-- Animated Green Wave SVG Corridor Path -->
+              <path id="svg-green-wave-corridor" d="M-10 255 C130 220 260 260 390 240 S610 215 780 260" class="green-wave-path"/>
+              <g class="flow-lines"><path d="M5 120 C140 130 200 110 330 135 S580 160 755 120" class="flow amber"/><path d="M-5 255 C130 220 260 260 390 240 S610 215 770 260" class="flow green"/><path d="M300 0 C270 100 340 210 315 430" class="flow green"/><path d="M510 0 C480 100 535 230 500 430" class="flow amber"/><path d="M-5 365 C160 330 250 360 400 340 S630 350 770 320" class="flow green"/></g>
+              <g class="map-labels"><text x="28" y="108">CIT Gubbi (J1)</text><text x="355" y="115">Gubbi Cross (J2)</text><text x="540" y="145">Nittur Market (J3)</text><text x="35" y="244">Central Corridor</text><text x="520" y="245">Batawadi (J4)</text><text x="170" y="405">Koramangala</text><text x="550" y="405">Tumakuru Entry</text></g>
+              <g id="mapMarkers"></g>
+            </svg>
+            <div class="map-caption"><span><b>◉</b> Select a marker to inspect an incident</span><span id="svg-map-caption">NH-206 CORRIDOR · 4-JUNCTION DIGITAL TWIN</span></div>
+          </div>
+        </div>
+        <div class="panel incident-panel glass">
+          <div class="panel-heading"><div><div class="section-kicker">NEEDS ATTENTION</div><h3>Priority incidents</h3></div><button class="text-button" data-goto="traffic">View all →</button></div>
+          <div id="priorityList" class="priority-list"></div>
+          <div class="route-card"><div class="route-top"><span class="route-icon">↗</span><div><b>Suggested detour</b><small>For ORR · Marathahalli</small></div><span class="route-tag">+7 min</span></div><p>Kundalahalli Gate <span>→</span> AECS Layout <span>→</span> Service road</p><button class="route-action" data-incident="DF-104">View route details <b>↗</b></button></div>
+        </div>
+      </div>
+      <div class="help-strip glass"><div class="help-symbol">✳</div><div><b>How DOME Flow S2 helps the city &amp; highway</b><p>Combines acoustic FFT emergency vehicle preemption, Greenshields queue-flushing, and zero-touch crowd-sourced road surface shocks to eliminate emergency bottlenecks and prevent pothole accidents.</p></div><span class="help-arrow">↗</span></div>
+    </section>
+
+    <!-- 2. TRAFFIC & INCIDENTS VIEW -->
+    <section class="view" id="traffic">
+      <div class="view-intro"><div><div class="section-kicker">SITUATIONAL AWARENESS</div><h2>Traffic &amp; incidents</h2><p class="muted">Explore road conditions and inspect reported issues across corridors.</p></div><span class="count-chip" id="filterCount">4 records</span></div>
+      <div class="filter-bar glass" id="filters"><button class="filter active" data-filter="All">All issues</button><button class="filter" data-filter="Congestion">Congestion</button><button class="filter" data-filter="Accident">Accidents</button><button class="filter" data-filter="Road closure">Road closures</button><button class="filter" data-filter="Roadworks">Roadworks</button></div>
+      <div class="traffic-layout"><div class="panel glass traffic-map"><div class="panel-heading"><div><div class="section-kicker">SELECT TO INSPECT</div><h3>Incident locations</h3></div><span class="small-muted">Demo map</span></div><div class="mini-map" id="miniMap"></div></div><div class="panel glass"><div class="panel-heading"><div><div class="section-kicker">ALL REPORTED ITEMS</div><h3>Issue register</h3></div></div><div class="issue-list" id="issueList"></div></div></div>
+    </section>
+
+    <!-- 3. ROAD MANAGEMENT VIEW -->
+    <section class="view" id="manage">
+      <div class="view-intro"><div><div class="section-kicker">OPERATOR WORKSPACE</div><h2>Road management</h2><p class="muted">Review, assign a response state and keep the issue register current.</p></div><span class="operator-badge">◉ Operator mode</span></div>
+      <div class="notice glass"><span>ⓘ</span><div><b>Prototype controls</b><p>Status changes are stored in this demo session only. No field teams or external traffic systems are contacted.</p></div></div>
+      <div class="panel glass"><div class="panel-heading"><div><div class="section-kicker">RESPONSE QUEUE</div><h3>Incident management</h3></div><span class="small-muted">Select a status to update</span></div><div class="management-list" id="managementList"></div></div>
+    </section>
+
+    <!-- 4. MOBILITY ANALYTICS VIEW -->
+    <section class="view" id="analytics">
+      <div class="view-intro"><div><div class="section-kicker">NETWORK PERFORMANCE</div><h2>Mobility analytics</h2><p class="muted">Illustrative trends to support operational and infrastructure decisions.</p></div><span class="demo-pill"><i></i> SAMPLE METRICS</span></div>
+      <div class="analytics-kpis"><div class="metric glass"><small>AVG. TRAVEL TIME</small><strong>28 <small>min</small></strong><span class="positive">↓ 8% this week</span></div><div class="metric glass"><small>CONGESTION HOTSPOTS</small><strong>4</strong><span class="amber-text">2 high-priority corridors</span></div><div class="metric glass"><small>INCIDENT RESPONSE</small><strong>6 <small>min</small></strong><span class="positive">↓ 2 min this month</span></div><div class="metric glass"><small>TRAFFIC FLOW</small><strong>72<span>%</span></strong><span class="positive">↑ 4% this hour</span></div></div>
+      <div class="analytics-grid"><div class="panel glass chart-panel"><div class="panel-heading"><div><div class="section-kicker">WEEKLY MOVEMENT</div><h3>Average travel time</h3></div><span class="small-muted">Minutes · sample</span></div><div class="chart" id="travelChart"></div></div><div class="panel glass chart-panel"><div class="panel-heading"><div><div class="section-kicker">CORRIDOR WATCH</div><h3>Congestion hotspots</h3></div><span class="small-muted">Relative load</span></div><div class="hotspots" id="hotspots-container"><div><span>Outer Ring Road</span><b>82%</b><i><em style="width:82%"></em></i></div><div><span>Old Airport Road</span><b>67%</b><i><em style="width:67%"></em></i></div><div><span>100 Feet Road</span><b>54%</b><i><em style="width:54%"></em></i></div><div><span>MG Road</span><b>29%</b><i><em style="width:29%"></em></i></div></div></div></div>
+      <div class="insight-card glass"><span class="insight-icon">✦</span><div><b>Operational insight</b><p>Outer Ring Road / Gubbi Town Cross is the strongest congestion bottleneck in this sample. Prioritising Greenshields queue clearance may reduce pressure on emergency response vehicles by up to 45%.</p></div></div>
+    </section>
+
+    <!-- 5. S2 COMMAND VIEW (STEP 4) -->
+    <section class="view" id="s2-command" data-view-panel="s2-command">
+      <div class="view-intro">
+        <div>
+          <div class="section-kicker">S2 EDGE AI &amp; INERTIAL PREEMPTION ENGINE</div>
+          <h2>S2 Command Center</h2>
+          <p class="muted">Zero-hardware acoustic ambulance siren detection + Greenshields queue-flushing &amp; zero-touch telematics crowd blackspot probes.</p>
+        </div>
+        <span class="operator-badge pulse-badge">🚨 S2 Edge Core Active</span>
+      </div>
+
+      <div class="s2-command-grid">
+        <!-- Left Column: Module A -->
+        <div class="panel glass s2-module-card">
+          <div class="panel-heading">
+            <div>
+              <div class="section-kicker">MODULE A — ZERO-HARDWARE PREEMPTION</div>
+              <h3>Emergency Green Corridor &amp; Queue-Flush Engine</h3>
+            </div>
+            <span class="status-tag in-progress" id="siren-status-badge">Acoustic Standby</span>
+          </div>
+
+          <!-- FFT Spectrum Box -->
+          <div class="fft-box glass">
+            <div class="fft-header">
+              <span class="fft-label">LIVE ACOUSTIC FFT SPECTRUM (650 Hz – 1450 Hz SIREN BAND)</span>
+              <span class="confidence-chip">Siren Confidence: <b id="siren-confidence">0%</b></span>
+            </div>
+            <div class="canvas-wrap">
+              <canvas id="siren-fft-canvas" width="460" height="110"></canvas>
+            </div>
+            <div class="fft-controls">
+              <button class="primary-btn mic-btn" id="btn-mic-toggle">🎙️ Start Live Siren Mic (FFT)</button>
+              <div class="slider-group">
+                <label for="siren-threshold">Sensitivity: <b id="thresh-val">65%</b></label>
+                <input type="range" id="siren-threshold" min="30" max="95" value="65">
+              </div>
+            </div>
+          </div>
+
+          <!-- Preemption Queue Parameters -->
+          <div class="s2-form-grid">
+            <div class="form-group full-width">
+              <label for="preempt-junction">Target Corridor Junction</label>
+              <select id="preempt-junction">
+                <option value="J1">J1: CIT Campus Gate (NH-206)</option>
+                <option value="J2" selected>J2: Gubbi Town Cross Junction</option>
+                <option value="J3">J3: Nittur Highway Market Bottleneck</option>
+                <option value="J4">J4: Batawadi – Tumakuru Entry Junction</option>
+              </select>
+            </div>
+            <div class="form-row-3">
+              <div class="form-group">
+                <label for="preempt-cars">Queued Cars</label>
+                <input type="number" id="preempt-cars" value="14" min="0" max="80">
+              </div>
+              <div class="form-group">
+                <label for="preempt-trucks">Heavy Trucks</label>
+                <input type="number" id="preempt-trucks" value="3" min="0" max="40">
+              </div>
+              <div class="form-group">
+                <label for="preempt-bikes">Bikes / 2W</label>
+                <input type="number" id="preempt-bikes" value="22" min="0" max="120">
+              </div>
+            </div>
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="preempt-dist">Ambulance Distance (m)</label>
+                <input type="number" id="preempt-dist" value="450" min="50" max="3000">
+              </div>
+              <div class="form-group">
+                <label for="preempt-speed">Approach Speed (km/h)</label>
+                <input type="number" id="preempt-speed" value="65" min="20" max="140">
+              </div>
+            </div>
+          </div>
+
+          <!-- Live Math Box -->
+          <div class="math-box glass" id="tflush-math-box">
+            <div class="math-title">GREENSHIELDS QUEUE-FLUSH HYDRODYNAMIC MODEL</div>
+            <div class="formula-line">
+              T<sub>flush</sub> = 3.5 + (Cars × 6.5 / 6.5) + (Trucks × 13.5 / 4.0) + (Bikes × 3.2 / 8.0)
+            </div>
+            <div class="math-eval">
+              <span>Required Flush Time: <strong id="calc-tflush">36.4s</strong></span>
+              <span>Ambulance ETA: <strong id="calc-eta">24.9s</strong></span>
+              <span class="margin-status safe" id="calc-margin">Status: Preempt Clear Margin OK</span>
+            </div>
+          </div>
+
+          <button class="danger-action-btn" id="btn-trigger-preempt">🚑 Trigger Emergency Green Wave Override</button>
+        </div>
+
+        <!-- Right Column: Module B -->
+        <div class="panel glass s2-module-card">
+          <div class="panel-heading">
+            <div>
+              <div class="section-kicker">MODULE B — ZERO-TOUCH CROWD TELEMATICS</div>
+              <h3>Pothole Blackspot &amp; Inertial Probe</h3>
+            </div>
+            <span class="status-tag resolved">3-Hit Clustering</span>
+          </div>
+
+          <div class="explanation-pill">
+            <span>ⓘ Spatial noise filter: Speed &ge; 15 km/h &amp; Z-Jerk &ge; 15 m/s³ prevents false positives from speed bumps</span>
+          </div>
+
+          <div class="s2-form-grid">
+            <div class="form-group full-width">
+              <label for="shock-corridor">Target Corridor Sector</label>
+              <select id="shock-corridor">
+                <option value="nh206" selected>NH-206: Gubbi – Nittur Highway Segment</option>
+                <option value="nh206-cit">NH-206: CIT Campus Approach</option>
+                <option value="nh206-batawadi">NH-206: Batawadi Tumakuru Entry</option>
+                <option value="bengaluru">Bengaluru: Outer Ring Road Sector</option>
+              </select>
+            </div>
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="shock-jerk">Z-Axis Jerk: <b id="jerk-val">24.5 m/s³</b></label>
+                <input type="range" id="shock-jerk" min="5" max="45" step="0.5" value="24.5">
+              </div>
+              <div class="form-group">
+                <label for="shock-speed">Vehicle Speed: <b id="speed-val">48 km/h</b></label>
+                <input type="range" id="shock-speed" min="5" max="90" step="1" value="48">
+              </div>
+            </div>
+          </div>
+
+          <!-- Live Inertial Readout Card -->
+          <div class="inertial-card glass">
+            <div class="inertial-header">
+              <span>INERTIAL PROBE TELEMETRY</span>
+              <span class="live-dot-wrap"><i class="dot green"></i> Ready</span>
+            </div>
+            <div class="inertial-readings">
+              <div class="reading">
+                <small>VERTICAL ACCEL / JERK</small>
+                <strong id="live-jerk-readout">24.5 <small>m/s³</small></strong>
+              </div>
+              <div class="reading">
+                <small>PROBE GPS SPEED</small>
+                <strong id="live-speed-readout">48 <small>km/h</small></strong>
+              </div>
+            </div>
+
+            <!-- 3-Hit Cluster Progress Bar -->
+            <div class="cluster-tracker">
+              <div class="cluster-top">
+                <small>3-HIT SPATIAL CLUSTER STATUS</small>
+                <span id="cluster-status-text">0 / 3 Hits — Listening for Commuter Shocks</span>
+              </div>
+              <div class="cluster-progress-wrap">
+                <div class="cluster-progress-bar" id="cluster-progress-bar" style="width: 0%"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="probe-actions">
+            <button class="primary-btn shock-btn" id="btn-sim-shock">💥 Simulate Commuter Pothole Shock (+1 Hit)</button>
+            <button class="secondary-btn sensor-btn" id="btn-motion-sensor">📱 Enable Live Phone Accelerometer</button>
+          </div>
+
+          <div class="pwd-auto-order glass">
+            <div class="pwd-header">
+              <span class="pwd-badge">PWD AUTO-DISPATCH ACTIVE</span>
+              <small>3x Cluster = Verified Pothole Incident</small>
+            </div>
+            <p>Automated municipal work-order dispatch triggers on the 3rd verified spatial shock hit, prioritizing road repair crews without manual citizen reports.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer> DOME Flow <span>·</span> S2 Smart traffic, clearer journeys <span class="footer-right">Prototype only · Data is simulated</span></footer>
+  </main>
+</div>
+
+<!-- Mobile Navigation Bar -->
+<nav class="mobile-nav">
+  <button class="active" data-view="overview"><span>◫</span>Home</button>
+  <button data-view="traffic"><span>⌁</span>Traffic</button>
+  <button data-view="manage"><span>▤</span>Manage</button>
+  <button data-view="analytics"><span>▥</span>Insights</button>
+  <button data-view="s2-command"><span>🚨</span>S2 Edge</button>
+</nav>
+
+<!-- Incident Detail Modal (Existing) -->
+<div class="modal-backdrop" id="incidentModal"><div class="modal glass"><button class="modal-close" id="closeModal">×</button><div id="modalContent"></div></div></div>
+
+<!-- S2 Info & Constraints Modal (Step 4) -->
+<div class="modal-backdrop" id="modal-s2-info">
+  <div class="modal glass s2-info-modal">
+    <button class="modal-close" id="close-s2-info-modal">×</button>
+    <div class="section-kicker">S2 SMARTER TRAFFIC &amp; ROAD MANAGEMENT ARCHITECTURE</div>
+    <h2>Mathematical Foundations &amp; System Constraints</h2>
+    
+    <div class="constraint-card glass">
+      <div class="constraint-head">
+        <span class="constraint-badge">S2 CONSTRAINT #1</span>
+        <b>NH-206 Corridor Geographical Scope</b>
+      </div>
+      <p>Focused on the high-density rural-urban transition corridor on <strong>National Highway 206 (CIT Gubbi to Tumakuru)</strong>. This 22-kilometer arterial features 4 critical bottleneck intersections:</p>
+      <ul class="constraint-list">
+        <li><strong>J1: CIT Campus Gate</strong> — Student transit surge mixed with industrial freight.</li>
+        <li><strong>J2: Gubbi Town Cross</strong> — Agricultural produce haulage, tractors &amp; intercity bus bottleneck.</li>
+        <li><strong>J3: Nittur Highway Market</strong> — Dense pedestrian market activity &amp; single-lane culvert bottlenecks.</li>
+        <li><strong>J4: Batawadi Entry Junction</strong> — Multi-lane toll and industrial entry into Tumakuru city center.</li>
+      </ul>
+    </div>
+
+    <div class="constraint-card glass">
+      <div class="constraint-head">
+        <span class="constraint-badge">S2 CONSTRAINT #2</span>
+        <b>Greenshields Hydrodynamic Model &amp; Crowd Telematics Assumptions</b>
+      </div>
+      <p><strong>Greenshields Queue-Flush Equation:</strong></p>
+      <div class="math-callout">
+        <code>T_flush = 3.5 + (Cars × 6.5 / 6.5) + (Trucks × 13.5 / 4.0) + (Bikes × 3.2 / 8.0)</code>
+      </div>
+      <p>Assumes startup lost time t<sub>0</sub> = 3.5s, realistic vehicle lengths, and following headway gaps. Guarantees queue clearance before ambulance arrival (ETA = d / v).</p>
+      <p><strong>Crowd-Telematics Inertial Filter:</strong> Discards vertical jerks where Speed &lt; 15 km/h or Z-Jerk &lt; 15 m/s³ to eliminate speed bumps, rumblers, and braking vibrations. A 3-hit spatial cluster triggers automated PWD work orders.</p>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body></html>
