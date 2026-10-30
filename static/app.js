@@ -411,8 +411,16 @@ function renderSummary(data) {
   if ($("#controller-mode-status")) $("#controller-mode-status").textContent = modes.join(" / ") + " · decision/act boundary";
   if ($("#controller-failsafe-badge")) {
     const failSafe = !!controllerStatus.fail_safe_active;
-    $("#controller-failsafe-badge").textContent = failSafe ? "FAIL-SAFE ACTIVE" : "HEARTBEATS HEALTHY";
-    $("#controller-failsafe-badge").classList.toggle("active", failSafe);
+    const isStandby = (controllerStatus.fail_safe_reason || "").toLowerCase().includes("waiting for input source");
+    if (isStandby) {
+      $("#controller-failsafe-badge").textContent = "STANDBY: WAITING FOR INPUT";
+      $("#controller-failsafe-badge").classList.remove("active");
+      $("#controller-failsafe-badge").classList.add("standby");
+    } else {
+      $("#controller-failsafe-badge").textContent = failSafe ? "FAIL-SAFE ACTIVE" : "HEARTBEATS HEALTHY";
+      $("#controller-failsafe-badge").classList.toggle("active", failSafe);
+      $("#controller-failsafe-badge").classList.remove("standby");
+    }
   }
   if ($("#controller-failsafe-reason")) $("#controller-failsafe-reason").textContent = controllerStatus.fail_safe_reason || "Heartbeat status unavailable";
   if ($("#controller-interlock-status")) {
@@ -1485,8 +1493,12 @@ function setSirenState(pattern, now) {
     }
     sirenDetector.confidence = pattern.confidence;
     if (pattern.ready && pattern.confidence >= SIREN_CONFIG.MIN_CONFIRM_CONFIDENCE) {
+      const wasConfirmed = sirenDetector.state === "CONFIRMED";
       sirenDetector.state = "CONFIRMED";
       sirenDetector.label = pattern.label;
+      if (!wasConfirmed && typeof notifyAttackLabSiren === "function") {
+        notifyAttackLabSiren(pattern.label);
+      }
     }
   } else if (sirenDetector.state !== "IDLE" && now - sirenDetector.lastPatternAt > SIREN_CONFIG.STATE_DROP_MS) {
     sirenDetector.state = "IDLE";
@@ -2791,11 +2803,289 @@ window.openJunctionFromMap = function(junctionId) {
 };
 
 
+
+// ==========================================
+// 6. ATTACK LAB: NAIVE SYSTEM VS AURA ENGINE
+// ==========================================
+let labSessionCode = "1024";
+let labPollTimer = null;
+let lastLabSirenSentAt = 0;
+
+function getLabCode() {
+  return labSessionCode || "1024";
+}
+
+function notifyAttackLabSiren(label) {
+  const now = Date.now();
+  if (now - lastLabSirenSentAt < 5000) return;
+  lastLabSirenSentAt = now;
+  fetch("/api/lab/siren_claim", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: getLabCode(), source: "live-laptop-mic", label: label || "wail" })
+  }).then(res => res.json()).then(() => {
+    pollLabState();
+  }).catch(() => {});
+}
+
+async function pollLabState() {
+  const panel = $("#attack-lab-panel");
+  if (!panel) return;
+
+  try {
+    const res = await fetch(`/api/lab/state?code=${getLabCode()}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const naive = data.naive || {};
+    const aura = data.aura || {};
+
+    // 1. Update Naive Card
+    if ($("#naive-hit-count")) $("#naive-hit-count").textContent = naive.hit_count || 0;
+    if ($("#naive-siren-verdict")) {
+      const isGreen = (naive.siren_state || "").includes("GREEN GRANTED");
+      $("#naive-siren-verdict").textContent = naive.siren_state || "IDLE";
+      $("#naive-siren-verdict").style.color = isGreen ? "#22c55e" : "#ef4444";
+    }
+    if ($("#naive-ticket-status")) {
+      if (naive.ticket_raised) {
+        $("#naive-ticket-status").innerHTML = `<span style="color:#ef4444; font-weight:800;">🚨 TICKET ISSUED: Km ${(naive.ticket_chainage_km || 5.4).toFixed(1)} (NO verification)</span>`;
+      } else {
+        $("#naive-ticket-status").innerHTML = `<span style="color:#94a3b8;">NO TICKET</span>`;
+      }
+    }
+    if ($("#naive-log-box")) {
+      const logs = naive.log || [];
+      $("#naive-log-box").textContent = logs.length ? logs.slice(-10).join("\n") : "Awaiting phone shakes or siren...";
+      $("#naive-log-box").scrollTop = $("#naive-log-box").scrollHeight;
+    }
+
+    // 2. Update AURA Card
+    if ($("#aura-hit-count")) $("#aura-hit-count").textContent = aura.events_count || 0;
+    if ($("#aura-siren-verdict")) {
+      const state = aura.siren_state || "IDLE";
+      $("#aura-siren-verdict").textContent = state;
+      if (state.includes("WATCH ONLY")) {
+        $("#aura-siren-verdict").style.color = "#f59e0b";
+      } else if (state.includes("GREEN GRANTED")) {
+        $("#aura-siren-verdict").style.color = "#10b981";
+      } else {
+        $("#aura-siren-verdict").style.color = "#94a3b8";
+      }
+    }
+    if ($("#aura-ticket-status")) {
+      if (aura.ticket_raised) {
+        $("#aura-ticket-status").innerHTML = `<span style="color:#10b981; font-weight:800;">✓ VERIFIED PWD TICKET (${aura.ticket_id || 'PWD-CORR-LAB'})</span>`;
+      } else {
+        $("#aura-ticket-status").innerHTML = `<span style="color:#10b981;">NO TICKET (Filtered as noise / awaiting 2nd fleet)</span>`;
+      }
+    }
+    if ($("#aura-log-box")) {
+      const logs = aura.log || [];
+      $("#aura-log-box").textContent = logs.length ? logs.slice(-10).join("\n") : "Awaiting events...";
+      $("#aura-log-box").scrollTop = $("#aura-log-box").scrollHeight;
+    }
+
+    // 3. Dynamic Verdict Banner
+    const strip = $("#lab-result-strip");
+    if (strip) {
+      const naiveFooledPothole = !!naive.ticket_raised;
+      const naiveFooledSiren = (naive.siren_state || "").includes("GREEN GRANTED");
+      const auraPassedPothole = !!aura.ticket_raised;
+      const auraPassedSiren = (aura.siren_state || "").includes("GREEN GRANTED");
+
+      if (naiveFooledPothole && naiveFooledSiren && !auraPassedPothole && !auraPassedSiren) {
+        strip.className = "lab-verdict-banner attack_proven";
+        strip.textContent = "Typical system: FOOLED BY BOTH (unverified pothole ticket + unauthorized green). AURA: REJECTED BOTH (filtered shock noise + blocked spoofed siren).";
+      } else if (naiveFooledPothole && !auraPassedPothole) {
+        strip.className = "lab-verdict-banner pothole_attack";
+        strip.textContent = "Typical system: FOOLED BY PHONE SHAKE (Pothole ticket issued without verification). AURA: REJECTED (Speed < 15 km/h, single device).";
+      } else if (naiveFooledSiren && !auraPassedSiren) {
+        strip.className = "lab-verdict-banner siren_attack";
+        strip.textContent = "Typical system: FOOLED BY SIREN AUDIO (Green granted blindly to loudspeaker). AURA: REJECTED (WATCH only - unsigned audio).";
+      } else if (auraPassedPothole || auraPassedSiren) {
+        strip.className = "lab-verdict-banner genuine_verified";
+        strip.textContent = "AURA: GENUINE EVENT VERIFIED & ACCEPTED (Multi-fleet consensus / Signed ECDSA preemption).";
+      } else {
+        strip.className = "lab-verdict-banner ready";
+        strip.textContent = "Attack Lab Ready: Waiting for phone hit shakes or siren spoof sound...";
+      }
+    }
+
+    // Sync pinned location dropdown if needed
+    const pinSel = $("#lab-pinned-km");
+    if (pinSel && data.pinned_chainage_km && Number(pinSel.value) !== Number(data.pinned_chainage_km)) {
+      pinSel.value = String(data.pinned_chainage_km);
+    }
+  } catch (err) {
+    console.error("Attack lab poll error:", err);
+  }
+}
+
+function initAttackLab() {
+  const panel = $("#attack-lab-panel");
+  if (!panel) return;
+
+  // Session Code setup
+  const stored = sessionStorage.getItem("aura_lab_code");
+  labSessionCode = stored || "1024";
+  sessionStorage.setItem("aura_lab_code", labSessionCode);
+
+  if ($("#lab-session-code-display")) $("#lab-session-code-display").textContent = labSessionCode;
+
+  const origin = window.location.origin;
+  const phoneUrl = `${origin}/lab/phone?code=${labSessionCode}`;
+  if ($("#lab-phone-url-input")) $("#lab-phone-url-input").value = phoneUrl;
+  if ($("#link-open-phone")) $("#link-open-phone").href = `/lab/phone?code=${labSessionCode}`;
+
+  // Copy Phone URL
+  const copyBtn = $("#btn-copy-phone-url");
+  if (copyBtn) {
+    copyBtn.onclick = () => {
+      navigator.clipboard.writeText(phoneUrl).then(() => {
+        const orig = copyBtn.textContent;
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => { copyBtn.textContent = orig; }, 1500);
+      }).catch(() => {
+        prompt("Copy phone URL:", phoneUrl);
+      });
+    };
+  }
+
+  // Pinned location change
+  const pinSel = $("#lab-pinned-km");
+  if (pinSel) {
+    pinSel.onchange = async () => {
+      const km = Number(pinSel.value);
+      try {
+        await fetch("/api/lab/pin_location", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: getLabCode(), chainage_km: km })
+        });
+        toast(`Lab pinned location set to Km ${km.toFixed(1)}`);
+        pollLabState();
+      } catch (e) {
+        console.error(e);
+      }
+    };
+  }
+
+  // Reset Lab button
+  const resetBtn = $("#btn-reset-lab");
+  if (resetBtn) {
+    resetBtn.onclick = async () => {
+      try {
+        await fetch("/api/lab/reset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: getLabCode() })
+        });
+        toast("Attack Lab state reset.");
+        pollLabState();
+      } catch (e) {
+        console.error(e);
+      }
+    };
+  }
+
+  // Fallback room noise siren simulation button
+  const simSirenBtn = $("#btn-lab-sim-siren");
+  if (simSirenBtn) {
+    simSirenBtn.onclick = async () => {
+      try {
+        await fetch("/api/lab/siren_claim", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: getLabCode(), source: "room-noise-fallback", label: "wail" })
+        });
+        toast("Siren claim submitted to both engines.");
+        pollLabState();
+      } catch (e) {
+        console.error(e);
+      }
+    };
+  }
+
+  // Genuine fleet evidence button
+  const genuinePotholeBtn = $("#btn-lab-genuine-pothole");
+  if (genuinePotholeBtn) {
+    genuinePotholeBtn.onclick = async () => {
+      try {
+        const res = await fetch("/api/lab/genuine_evidence", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: getLabCode() })
+        });
+        const d = await res.json();
+        toast("Genuine fleet evidence submitted (2 independent moving vehicles).");
+        pollLabState();
+      } catch (e) {
+        console.error(e);
+      }
+    };
+  }
+
+  // Genuine signed ambulance button
+  const genuineAmbulanceBtn = $("#btn-lab-genuine-ambulance");
+  if (genuineAmbulanceBtn) {
+    genuineAmbulanceBtn.onclick = async () => {
+      try {
+        await fetch("/api/lab/genuine_ambulance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: getLabCode() })
+        });
+        toast("Genuine ambulance (ECDSA signature + siren) submitted.");
+        pollLabState();
+      } catch (e) {
+        console.error(e);
+      }
+    };
+  }
+
+  // Toggle Plain English Box
+  const toggleEnglishBtn = $("#btn-toggle-plain-english");
+  const englishBox = $("#lab-plain-english-box");
+  if (toggleEnglishBtn && englishBox) {
+    toggleEnglishBtn.onclick = () => {
+      const isHidden = englishBox.style.display === "none";
+      englishBox.style.display = isHidden ? "block" : "none";
+      toggleEnglishBtn.textContent = isHidden ? "Hide plain English explanation ▴" : "How this works in plain English ▾";
+    };
+  }
+
+  // Lab Self-Check button
+  const selfCheckBtn = $("#btn-lab-self-check");
+  const selfCheckOut = $("#lab-self-check-output");
+  if (selfCheckBtn && selfCheckOut) {
+    selfCheckBtn.onclick = async () => {
+      selfCheckOut.style.display = "block";
+      selfCheckOut.textContent = "Running 4-test Attack Lab self-check suite...";
+      try {
+        const res = await fetch("/api/dev/lab_self_check", { method: "POST" });
+        const d = await res.json();
+        selfCheckOut.innerHTML = `<b>LAB ADVERSARIAL SELF-CHECK (${d.all_passed ? 'ALL 4 PASSED' : 'FAILURES'}):</b><br>` +
+          d.tests.map(t => `<span style="color:${t.pass ? '#10b981' : '#ef4444'}">[${t.pass ? 'PASS' : 'FAIL'}] ${t.name}</span>: ${t.detail}`).join("<br>");
+        toast(d.all_passed ? "✓ All 4 Attack Lab tests PASSED" : "Some lab tests failed");
+      } catch (e) {
+        selfCheckOut.textContent = `Error: ${e.message}`;
+      }
+    };
+  }
+
+  // Start polling
+  if (labPollTimer) clearInterval(labPollTimer);
+  pollLabState();
+  labPollTimer = setInterval(pollLabState, 1000);
+}
+
+
 // Bootstrap all modules
 initTopbarAndModals();
 initModuleA();
 initModuleB();
 initCorridorMap();
+initAttackLab();
 load();
 drawChart();
 updateHeaderClock();

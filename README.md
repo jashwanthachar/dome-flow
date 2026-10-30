@@ -38,6 +38,41 @@ Outputs:
 - `data/junctions.json`: Server-loaded junction configuration with road-derived approach bearings (`arm_bearings: {"W": ..., "E": ..., "N": ..., "S": ...}`).
 
 
+
+---
+
+## Attack Lab: Naive System vs. AURA Engine
+
+The **Attack Lab** (located at the top of the **S2 Edge AI & Preemption** dashboard) is a live adversarial testbed. It feeds identical physical inputs (real phone hand shakes, loudspeaker siren sounds) simultaneously to two engines:
+
+| Attack Scenario | Typical / Naive Approach | AURA Verified Engine |
+| :--- | :--- | :--- |
+| **Indoor Phone Shake** (Sit in chair, shake phone 3 times) | **FOOLED:** Naive threshold (>12 m/s²) immediately issues an unverified PWD pothole repair ticket. | **REJECTED:** Speed is 0 km/h (< 15 km/h filter) → classified as NOISE. Single device → requires ≥ 2 independent commercial fleet groups. Zero tickets issued. |
+| **Loudspeaker Siren Spoof** (Play siren YouTube/MP3 near microphone) | **FOOLED:** Naive acoustic detector hears wail/yelp frequency pattern and blindly grants GREEN signal. | **BLOCKED:** Acoustic match without a cryptographically signed ECDSA token triggers WATCH ONLY status. Signal remains safe; preemption denied. |
+| **Genuine Pothole Evidence** (Two commercial fleet vehicles passing at 40 km/h) | Same unverified complaint format. | **VERIFIED:** On-device jerk & z-shock peaks + pre-braking curve + multi-fleet spatial clustering → verified PWD work-order ticket. |
+| **Authorized Emergency Preemption** (Approaching ambulance with siren + valid ECDSA key) | Indistinguishable from spoofed audio. | **PREEMPTION GRANTED:** Both acoustic proximity match AND ECDSA digital signature verified → safe green corridor cleared. |
+
+### How to Run the Attack Lab Live with Phones
+
+1. Open the **S2 Edge AI & Preemption** dashboard on your laptop. Note the 4-digit **Lab Session Code** (e.g. `1024`).
+2. On your phone (connected to the same Wi-Fi), navigate to `http://<LAPTOP-IP>:5000/lab/phone?code=1024` (or click **Copy** / **Open Phone Tool**).
+3. **Attack 1 (Pothole Complaint Spoof):**
+   - Tap **"Start hit sensor"** on the phone.
+   - Shake the phone firmly 3 times while sitting indoors.
+   - Look at the dashboard:
+     - The **Naive System** increments its hit counter and generates an unverified municipal complaint ticket at Km 5.4.
+     - The **AURA Engine** flags the hits as `NOISE (speed < 15 km/h)` and `REJECTED (single source group)`, creating zero tickets.
+4. **Attack 2 (Acoustic Siren Preemption Spoof):**
+   - On the phone, tap **"Play fake siren"** (or play any emergency siren sound on YouTube).
+   - The laptop microphone detects the acoustic wail pattern.
+   - The **Naive System** flips immediately to `GREEN GRANTED`.
+   - The **AURA Engine** places the junction in `WATCH ONLY (Spoof Blocked - Missing Digital Signature)`.
+5. **Legitimate Verification Proof:**
+   - Click **"Add genuine evidence"** to demonstrate multi-fleet speed-correlated consensus.
+   - Click **"Genuine ambulance"** to demonstrate cryptographic ECDSA preemption verification.
+6. **Automated Self-Check:**
+   - Click **"Run Lab Self-Check"** (or execute `POST /api/dev/lab_self_check`) to run all 4 adversarial unit tests in memory.
+
 ## Run locally on Windows
 
 From PowerShell in the project folder:

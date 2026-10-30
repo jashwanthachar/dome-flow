@@ -790,6 +790,7 @@ button {
 }
 .failsafe-badge { color: #34d399; }
 .failsafe-badge.active { color: #fca5a5; }
+.failsafe-badge.standby { color: #38bdf8; }
 .simulation-banner {
   margin: 8px 0 14px;
   padding: 9px;
@@ -2831,4 +2832,52 @@ footer span {
   background: rgba(56, 189, 248, 0.15);
   color: #38bdf8;
   border-color: #38bdf8;
+}
+
+
+/* ==========================================
+   ATTACK LAB STYLES
+   ========================================== */
+.attack-lab-panel {
+  transition: all 0.3s ease;
+}
+.lab-verdict-banner {
+  border-radius: 8px;
+  font-weight: 800;
+  font-size: 13px;
+  padding: 12px 16px;
+  text-align: center;
+}
+.lab-verdict-banner.ready {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  color: #94a3b8;
+}
+.lab-verdict-banner.attack_proven {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid #ef4444;
+  color: #fca5a5;
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.2);
+}
+.lab-verdict-banner.pothole_attack {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid #f59e0b;
+  color: #fde68a;
+}
+.lab-verdict-banner.siren_attack {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid #ef4444;
+  color: #fca5a5;
+}
+.lab-verdict-banner.genuine_verified {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid #10b981;
+  color: #6ee7b7;
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.2);
+}
+.lab-engine-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.lab-engine-card:hover {
+  transform: translateY(-2px);
 }
