@@ -371,7 +371,11 @@ def trigger_preempt():
         bikes = int(payload.get("bikes", target_j["bikes"]))
         ambulance_dist_m = float(payload.get("ambulance_dist_m", 800.0))
         ambulance_speed_kmh = float(payload.get("ambulance_speed_kmh", 55.0))
-        siren_confidence = float(payload.get("siren_confidence", 0.94))
+        siren_confidence = max(0.0, min(1.0, float(payload.get("siren_confidence", 0.0))))
+        siren_confirmed = bool(payload.get("siren_confirmed", False))
+        siren_label = payload.get("siren_label", "none")
+        if siren_label not in ("wail", "yelp", "hi-lo", "none"):
+            siren_label = "none"
 
         # Greenshields Queue-Flush time
         t_flush = 3.5 + (cars * (4.5 + 2.0) / 6.5) + (trucks * (10.5 + 3.0) / 4.0) + (bikes * (2.0 + 1.2) / 8.0)
@@ -414,7 +418,7 @@ def trigger_preempt():
             "reported": india_now().strftime("%I:%M:%S %p"),
             "status": "In progress",
             "delay": 0,
-            "detail": f"Emergency preemption corridor engaged. ETA: {round(eta_sec, 1)}s ({round(ambulance_dist_m)}m @ {round(ambulance_speed_kmh)} km/h). Siren confidence: {int(siren_confidence * 100)}%.",
+            "detail": f"Emergency preemption corridor engaged. ETA: {round(eta_sec, 1)}s ({round(ambulance_dist_m)}m @ {round(ambulance_speed_kmh)} km/h). Siren event: {siren_label} ({'confirmed' if siren_confirmed else 'manual'}), confidence: {round(siren_confidence * 100)}%.",
             "detour": "Clear emergency priority corridor. All conflicting approaches held on RED.",
             "impact": "High",
             "corridor": "nh206"
@@ -431,6 +435,8 @@ def trigger_preempt():
         "ambulance_dist_m": ambulance_dist_m,
         "ambulance_speed_kmh": ambulance_speed_kmh,
         "siren_confidence": siren_confidence,
+        "siren_confirmed": siren_confirmed,
+        "siren_label": siren_label,
         "formula": "3.5 + (cars * (4.5 + 2.0) / 6.5) + (trucks * (10.5 + 3.0) / 4.0) + (bikes * (2.0 + 1.2) / 8.0)",
         "queue_breakdown": {
             "cars": cars,

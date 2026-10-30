@@ -1476,6 +1476,92 @@ button {
   margin-top: 11px;
 }
 
+.siren-summary,
+.siren-live-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  font-size: 9px;
+  color: #91a5bb;
+}
+
+.siren-summary span,
+.siren-live-stats span {
+  white-space: nowrap;
+}
+
+.siren-summary b,
+.siren-live-stats b {
+  color: #dceeff;
+  font-family: 'JetBrains Mono', monospace;
+  margin-left: 3px;
+}
+
+.siren-live-stats {
+  justify-content: space-between;
+  border-top: 1px solid #ffffff0c;
+  margin-top: 10px;
+  padding-top: 9px;
+}
+
+.siren-test-panel {
+  padding: 14px;
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  border-radius: 14px;
+  background: rgba(11, 23, 40, 0.56);
+}
+
+.siren-test-panel[hidden] {
+  display: none;
+}
+
+.siren-test-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 11px;
+}
+
+.siren-test-heading b,
+.siren-test-heading small {
+  display: block;
+}
+
+.siren-test-heading b {
+  color: #dceeff;
+  font-size: 11px;
+}
+
+.siren-test-heading small,
+#siren-test-playing {
+  color: #91a5bb;
+  font-size: 9px;
+}
+
+.siren-test-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin-bottom: 9px;
+}
+
+.siren-test-buttons button {
+  border: 1px solid #ffffff18;
+  border-radius: 9px;
+  background: #ffffff0a;
+  color: #c5d8eb;
+  padding: 8px;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.siren-test-buttons button:hover {
+  border-color: #38bdf855;
+  background: #38bdf818;
+}
+
 .mic-btn {
   background: linear-gradient(135deg, #0284c7, #0369a1);
   color: #ffffff;
@@ -1493,25 +1579,6 @@ button {
 .mic-btn:hover {
   background: linear-gradient(135deg, #0369a1, #0284c7);
   box-shadow: 0 4px 15px rgba(2, 132, 199, 0.35);
-}
-
-.slider-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 10px;
-  color: #94a3b8;
-}
-
-.slider-group b {
-  color: #e2e8f0;
-  min-width: 24px;
-}
-
-.slider-group input[type="range"] {
-  accent-color: #38bdf8;
-  width: 90px;
-  height: 4px;
 }
 
 /* S2 Form Layout */
@@ -2270,5 +2337,11 @@ footer span {
   }
   .probe-actions {
     flex-direction: column;
+  }
+  .siren-test-buttons {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .siren-test-heading {
+    align-items: flex-start;
   }
 }

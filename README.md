@@ -30,7 +30,7 @@ The service is configured with one Gunicorn worker so requests share the same in
 
 ## Suggested feature demo
 
-1. Open **S2 Edge AI & Preemption** and allow microphone access. Play a siren recording near the device, or use the synthetic siren fallback if the microphone is unavailable. The detector analyzes sound in the 650–1450 Hz band; it is a demo detector, not a validated emergency-vehicle classifier.
+1. Open **S2 Edge AI & Preemption** and allow microphone access. Play a siren recording near the device, or use the synthetic siren fallback if the microphone is unavailable. The detector searches 500–1800 Hz and looks for repeated wail, yelp, or hi-lo patterns; it is still a demo detector, not a validated emergency-vehicle classifier.
 2. Show the live queue and ETA calculation, then trigger the emergency green wave. The dashboard updates the target and downstream junctions and records an incident.
 3. On the phone, enable the accelerometer and shake the phone firmly to submit qualifying motion events. For a predictable presentation, use **Simulate Commuter Pothole Shock** three times instead. The third qualifying request creates a demo incident and work order.
 4. Show the resulting changes in Overview, Road Management, and Analytics.
@@ -45,3 +45,7 @@ The three-hit demonstration counts qualifying requests; it does not validate tha
 - `static/style.css` — dashboard styling and responsive phone layout.
 - `requirements.txt` — Flask and Gunicorn dependencies.
 - `render.yaml` — Render deployment configuration.
+
+## Siren detector self-check
+
+Open the app with `?dev=1` appended to its URL, go to **S2 Edge AI & Preemption**, and select **Run self-check**. Open the browser developer console to see PASS/FAIL results for the six generated signals. Stop the live microphone first. Test audio is generated and analyzed in the browser; no audio is sent to Flask.

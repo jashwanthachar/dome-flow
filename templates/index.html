@@ -208,19 +208,41 @@
           <!-- FFT Spectrum Box -->
           <div class="fft-box glass">
             <div class="fft-header">
-              <span class="fft-label">LIVE ACOUSTIC FFT SPECTRUM (650 Hz – 1450 Hz SIREN BAND)</span>
-              <span class="confidence-chip">Siren Confidence: <b id="siren-confidence">0%</b></span>
+              <span class="fft-label">LIVE ACOUSTIC FFT SPECTRUM (500 Hz – 1800 Hz SEARCH BAND)</span>
+              <span class="confidence-chip">Detector Score: <b id="siren-confidence">0%</b></span>
             </div>
             <div class="canvas-wrap">
               <canvas id="siren-fft-canvas" width="460" height="110"></canvas>
             </div>
             <div class="fft-controls">
               <button class="primary-btn mic-btn" id="btn-mic-toggle">🎙️ Start Live Siren Mic (FFT)</button>
-              <div class="slider-group">
-                <label for="siren-threshold">Sensitivity: <b id="thresh-val">65%</b></label>
-                <input type="range" id="siren-threshold" min="30" max="95" value="65">
+              <div class="siren-summary">
+                <span>State <b id="siren-detector-state">IDLE</b></span>
+                <span>Pattern <b id="siren-detector-label">none</b></span>
+                <span>Score <b id="siren-detector-confidence">0.00</b></span>
               </div>
             </div>
+            <div class="siren-live-stats">
+              <span>Peak <b id="siren-frequency">—</b></span>
+              <span>Prominence <b id="siren-prominence">—</b></span>
+              <span>Flatness <b id="siren-flatness">—</b></span>
+            </div>
+          </div>
+
+          <div class="siren-test-panel glass" id="siren-test-panel" hidden>
+            <div class="siren-test-heading">
+              <div><b>Test signals</b><small>Dev only · generated and analyzed in this browser</small></div>
+              <button class="secondary-btn" id="siren-self-check">Run self-check</button>
+            </div>
+            <div class="siren-test-buttons">
+              <button data-siren-test="wail">Wail sweep</button>
+              <button data-siren-test="yelp">Yelp sweep</button>
+              <button data-siren-test="hiLo">Hi-lo</button>
+              <button data-siren-test="horn">Steady horn</button>
+              <button data-siren-test="noise">White noise</button>
+              <button data-siren-test="chord">Two-tone chord</button>
+            </div>
+            <small id="siren-test-playing">Open this page with ?dev=1 to show developer tools.</small>
           </div>
 
           <!-- Preemption Queue Parameters -->

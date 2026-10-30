@@ -1,3 +1,50 @@
+// Tunable siren detector and synthetic signal settings.
+const SIREN_CONFIG = Object.freeze({
+  FFT_SIZE: 4096,                         // Finer frequency resolution for the siren band.
+  SAMPLE_INTERVAL_MS: 50,                 // Analyze 20 audio frames per second.
+  WINDOW_MS: 4000,                        // Rolling pattern analysis window.
+  SEARCH_MIN_HZ: 500,                     // Lower edge of dominant-peak search band.
+  SEARCH_MAX_HZ: 1800,                    // Upper edge of dominant-peak search band.
+  MIN_PEAK_DB: -58,                       // Reject near-silent frames.
+  MIN_PEAK_PROMINENCE: 3.0,               // Peak must exceed band mean by this ratio.
+  MAX_SPECTRAL_FLATNESS: 0.48,             // Reject noise-like spectra above this value.
+  MIN_VALID_FRAMES: 20,                   // Minimum usable frames in a pattern window.
+  MIN_VALID_RATIO: 0.65,                  // Required share of usable frames.
+  MAX_FRAME_GAP_MS: 180,                  // Reject patterns with large missing-frame gaps.
+  MIN_SWEEP_HZ: 250,                      // Minimum wail/yelp peak-to-peak movement.
+  MIN_TONE_GAP_HZ: 300,                   // Minimum separation for alternating hi-lo tones.
+  MIN_REVERSAL_HZ: 140,                   // Minimum movement before accepting a sweep reversal.
+  MAX_PEAK_INTERPOLATION_BINS: 0.5,       // Bound parabolic peak interpolation to adjacent bins.
+  MIN_WAVE_CANDIDATE_REVERSALS: 2,        // Minimum reversals before a sweep candidate is considered.
+  MIN_WAVE_REVERSALS: 3,                  // At least this many consistent sweep turns.
+  MIN_HILO_CANDIDATE_TOGGLES: 2,          // Minimum switches before a hi-lo candidate is considered.
+  MIN_HILO_TOGGLES: 4,                    // Minimum low/high switches for hi-lo detection.
+  HILO_TONE_TOLERANCE_HZ: 120,             // Maximum spread around each hi-lo tone.
+  HILO_MIN_SEGMENT_MS: 120,               // Ignore very short tone assignments.
+  MIN_FULL_CYCLES: 2,                     // Normal confirmation requirement.
+  MIN_PATTERN_DURATION_MS: 1500,          // Alternative confirmation duration for consistent patterns.
+  WAIL_PERIOD_MIN_MS: 900,                // Full up/down cycle range for wail.
+  WAIL_PERIOD_MAX_MS: 2800,
+  YELP_PERIOD_MIN_MS: 250,                // Full up/down cycle range for yelp.
+  YELP_PERIOD_MAX_MS: 850,
+  HILO_PERIOD_MIN_MS: 300,                // Full low/high cycle range for hi-lo.
+  HILO_PERIOD_MAX_MS: 1800,
+  MAX_PERIOD_CV: 0.42,                    // Maximum relative variation in cycle timing.
+  MIN_CONFIRM_CONFIDENCE: 0.68,           // Minimum pattern score to confirm.
+  STATE_DROP_MS: 1000,                    // Confirmed state grace period after pattern loss.
+  RETRIGGER_COOLDOWN_MS: 8000,            // Prevent repeated preemptions from one long siren.
+  TEST_SIGNAL_DURATION_MS: 5000,          // Duration used by the self-check for each signal.
+  TEST_OUTPUT_GAIN: 0.035,                // Quiet output level for generated test sounds.
+  TEST_SIGNALS: {
+    wail:  { expected: "wail",  baseHz: 1150, deviationHz: 430, periodSeconds: 1.8, waveform: "sine" },
+    yelp:  { expected: "yelp",  baseHz: 1100, deviationHz: 400, periodSeconds: 0.58, waveform: "triangle" },
+    hiLo:  { expected: "hi-lo", baseHz: 1100, deviationHz: 390, periodSeconds: 0.72, waveform: "square" },
+    horn:  { expected: null, frequencyHz: 1000, waveform: "sine" },
+    noise: { expected: null },
+    chord: { expected: null, frequenciesHz: [720, 1220], waveform: "sine" }
+  }
+});
+
 let allIncidents = [], currentSummary = null, activeFilter = "All";
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -350,14 +397,15 @@ function updateLiveMath() {
   }
 }
 
-async function triggerPreemptionOverride() {
+async function triggerPreemptionOverride(sirenEvent) {
   const junction_id = $("#preempt-junction")?.value || "J1";
   const cars = parseInt($("#preempt-cars")?.value || 14);
   const trucks = parseInt($("#preempt-trucks")?.value || 3);
   const bikes = parseInt($("#preempt-bikes")?.value || 22);
   const ambulance_dist_m = parseFloat($("#preempt-dist")?.value || 450);
   const ambulance_speed_kmh = parseFloat($("#preempt-speed")?.value || 65);
-  const siren_confidence = Math.max(sirenConfidence / 100, 0.94);
+  const event = sirenEvent || { confirmed: false, label: "none", confidence: 0 };
+  const siren_confidence = Math.max(0, Math.min(1, Number(event.confidence) || 0));
 
   try {
     const res = await api("/api/preempt/trigger", {
@@ -369,7 +417,9 @@ async function triggerPreemptionOverride() {
         bikes,
         ambulance_dist_m,
         ambulance_speed_kmh,
-        siren_confidence
+        siren_confidence,
+        siren_confirmed: !!event.confirmed,
+        siren_label: event.label || "none"
       })
     });
 
@@ -385,176 +435,457 @@ async function triggerPreemptionOverride() {
   }
 }
 
-// Web Audio API Siren FFT Engine
-let audioCtx = null, analyser = null, micStream = null, isMicActive = false;
-let sirenConfidence = 0, sirenLockStartTime = 0, lastSirenTriggerTime = 0;
-let synthOsc = null, synthGain = null, synthLfo = null, micPermissionFailed = false;
+// Browser-side siren detector. The analyser and all audio stay in this page.
+let audioCtx = null;
+let analyser = null;
+let micStream = null;
+let micSource = null;
+let isMicActive = false;
+let micPermissionFailed = false;
+let sirenAudioMode = "idle";
+let sirenTestMode = false;
+let activeSignalNodes = [];
+let activeSignalStopTimer = null;
+let lastSirenSampleAt = 0;
+let lastSirenTriggerTime = -Infinity;
+let sirenConfidence = 0;
+let sirenLabel = "none";
+let sirenHistory = [];
+let sirenFloatData = null;
+let sirenByteData = null;
 
-function checkSirenTrigger() {
-  const threshold = parseInt($("#siren-threshold")?.value || 65);
-  const now = Date.now();
+const sirenDetector = {
+  state: "IDLE",
+  label: "none",
+  confidence: 0,
+  lastPatternAt: 0,
+  candidateLabel: "none",
+  candidateSince: 0
+};
 
-  if (sirenConfidence >= threshold) {
-    if (!sirenLockStartTime) {
-      sirenLockStartTime = now;
-    } else if (now - sirenLockStartTime >= 1200) {
-      if (now - lastSirenTriggerTime >= 8000) {
-        lastSirenTriggerTime = now;
-        sirenLockStartTime = 0;
-        toast("🎙️ Acoustic Siren Locked (650-1450Hz) — Auto-Preempting Junction!");
-        triggerPreemptionOverride();
+function ensureSirenAnalyser() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (!analyser) {
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = SIREN_CONFIG.FFT_SIZE;
+    analyser.smoothingTimeConstant = 0;
+    sirenFloatData = new Float32Array(analyser.frequencyBinCount);
+    sirenByteData = new Uint8Array(analyser.frequencyBinCount);
+    const silentSink = audioCtx.createGain();
+    silentSink.gain.value = 0;
+    analyser.connect(silentSink);
+    silentSink.connect(audioCtx.destination);
+  }
+  return analyser;
+}
+
+function resetSirenDetector() {
+  sirenHistory = [];
+  sirenDetector.state = "IDLE";
+  sirenDetector.label = "none";
+  sirenDetector.confidence = 0;
+  sirenDetector.lastPatternAt = 0;
+  sirenDetector.candidateLabel = "none";
+  sirenDetector.candidateSince = 0;
+  sirenConfidence = 0;
+  sirenLabel = "none";
+  renderSirenReadout(null);
+}
+
+function renderSirenReadout(frame) {
+  const confidence = Math.max(0, Math.min(1, sirenDetector.confidence || 0));
+  sirenConfidence = confidence;
+  sirenLabel = sirenDetector.label || "none";
+  if ($("#siren-confidence")) $("#siren-confidence").textContent = Math.round(confidence * 100) + "%";
+  if ($("#siren-frequency")) $("#siren-frequency").textContent = frame && frame.valid ? Math.round(frame.frequencyHz) + " Hz" : "—";
+  if ($("#siren-prominence")) $("#siren-prominence").textContent = frame ? frame.prominence.toFixed(1) + "×" : "—";
+  if ($("#siren-flatness")) $("#siren-flatness").textContent = frame ? frame.flatness.toFixed(2) : "—";
+  if ($("#siren-detector-state")) $("#siren-detector-state").textContent = sirenDetector.state;
+  if ($("#siren-detector-label")) $("#siren-detector-label").textContent = sirenLabel;
+  if ($("#siren-detector-confidence")) $("#siren-detector-confidence").textContent = confidence.toFixed(2);
+  const badge = $("#siren-status-badge");
+  if (badge) {
+    badge.textContent = sirenAudioMode === "idle" ? "Acoustic Standby" :
+      sirenAudioMode === "mic" ? (sirenDetector.state === "CONFIRMED" ? "Siren Confirmed" : "Listening (Live Mic)") :
+      sirenAudioMode === "synthetic" ? (sirenDetector.state === "CONFIRMED" ? "Synthetic Siren Confirmed" : "Synthetic Siren Active") :
+      "Test Signal: " + (sirenLabel === "none" ? "Analyzing" : sirenLabel);
+    badge.className = "status-tag " + (sirenDetector.state === "CONFIRMED" ? "resolved" : "in-progress");
+  }
+}
+
+function extractSirenFeatures(now) {
+  if (!analyser || !audioCtx) return { time: now, valid: false, frequencyHz: 0, prominence: 0, flatness: 1 };
+  analyser.getFloatFrequencyData(sirenFloatData);
+  const binHz = audioCtx.sampleRate / analyser.fftSize;
+  const first = Math.max(1, Math.ceil(SIREN_CONFIG.SEARCH_MIN_HZ / binHz));
+  const last = Math.min(sirenFloatData.length - 2, Math.floor(SIREN_CONFIG.SEARCH_MAX_HZ / binHz));
+  let peakIndex = first;
+  let peakDb = -Infinity;
+  let sumMagnitude = 0;
+  let sumLogMagnitude = 0;
+  let bandCount = 0;
+
+  for (let i = first; i <= last; i++) {
+    const db = sirenFloatData[i];
+    const magnitude = Number.isFinite(db) ? Math.pow(10, db / 20) : 0;
+    sumMagnitude += magnitude;
+    sumLogMagnitude += Math.log(Math.max(magnitude, 1e-12));
+    bandCount++;
+    if (db > peakDb) {
+      peakDb = db;
+      peakIndex = i;
+    }
+  }
+
+  const meanMagnitude = bandCount ? sumMagnitude / bandCount : 0;
+  const geometricMean = bandCount ? Math.exp(sumLogMagnitude / bandCount) : 0;
+  const flatness = meanMagnitude > 0 ? geometricMean / meanMagnitude : 1;
+  const prominence = meanMagnitude > 0 ? Math.pow(10, peakDb / 20) / meanMagnitude : 0;
+
+  const y0 = sirenFloatData[peakIndex - 1];
+  const y1 = sirenFloatData[peakIndex];
+  const y2 = sirenFloatData[peakIndex + 1];
+  const denominator = 2 * (y0 - 2 * y1 + y2);
+  let offset = Number.isFinite(denominator) && denominator !== 0 ? (y0 - y2) / denominator : 0;
+  offset = Math.max(-SIREN_CONFIG.MAX_PEAK_INTERPOLATION_BINS,
+    Math.min(SIREN_CONFIG.MAX_PEAK_INTERPOLATION_BINS, offset));
+  const frequencyHz = (peakIndex + offset) * binHz;
+  const valid = peakDb >= SIREN_CONFIG.MIN_PEAK_DB &&
+    prominence >= SIREN_CONFIG.MIN_PEAK_PROMINENCE &&
+    flatness <= SIREN_CONFIG.MAX_SPECTRAL_FLATNESS;
+
+  return { time: now, valid, frequencyHz, prominence, flatness, peakDb };
+}
+
+function average(values) {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+}
+
+function median(values) {
+  if (!values.length) return 0;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function intervalStats(times) {
+  const intervals = [];
+  for (let i = 1; i < times.length; i++) intervals.push(times[i] - times[i - 1]);
+  const mean = average(intervals);
+  const deviation = Math.sqrt(average(intervals.map(value => Math.pow(value - mean, 2))));
+  return { mean, cv: mean > 0 ? deviation / mean : Infinity };
+}
+
+function analyzeHiLo(points, common) {
+  if (points.length < SIREN_CONFIG.MIN_VALID_FRAMES) return null;
+  const split = median(points.map(point => point.frequencyHz));
+  const lower = points.filter(point => point.frequencyHz <= split).map(point => point.frequencyHz);
+  const upper = points.filter(point => point.frequencyHz > split).map(point => point.frequencyHz);
+  if (!lower.length || !upper.length) return null;
+  const lowHz = median(lower);
+  const highHz = median(upper);
+  const gapHz = highHz - lowHz;
+  if (gapHz < SIREN_CONFIG.MIN_TONE_GAP_HZ) return null;
+
+  const states = points.map(point => Math.abs(point.frequencyHz - lowHz) <= Math.abs(point.frequencyHz - highHz) ? "L" : "H");
+  const runs = [];
+  let runStart = points[0].time;
+  let runState = states[0];
+  for (let i = 1; i < states.length; i++) {
+    if (states[i] !== runState) {
+      if (points[i].time - runStart >= SIREN_CONFIG.HILO_MIN_SEGMENT_MS) runs.push({ state: runState, time: runStart });
+      runStart = points[i].time;
+      runState = states[i];
+    }
+  }
+  if (points[points.length - 1].time - runStart >= SIREN_CONFIG.HILO_MIN_SEGMENT_MS) runs.push({ state: runState, time: runStart });
+  const toggles = Math.max(0, runs.length - 1);
+  if (toggles < SIREN_CONFIG.MIN_HILO_CANDIDATE_TOGGLES) return null;
+
+  const lowSpread = Math.max(...lower) - Math.min(...lower);
+  const highSpread = Math.max(...upper) - Math.min(...upper);
+  if (lowSpread > SIREN_CONFIG.HILO_TONE_TOLERANCE_HZ || highSpread > SIREN_CONFIG.HILO_TONE_TOLERANCE_HZ) return null;
+  const timing = intervalStats(runs.slice(1).map(run => run.time));
+  const periodMs = timing.mean * 2;
+  if (periodMs < SIREN_CONFIG.HILO_PERIOD_MIN_MS || periodMs > SIREN_CONFIG.HILO_PERIOD_MAX_MS ||
+      timing.cv > SIREN_CONFIG.MAX_PERIOD_CV) return null;
+
+  const durationMs = points[points.length - 1].time - points[0].time;
+  const cycles = toggles / 2;
+  const ready = cycles >= SIREN_CONFIG.MIN_FULL_CYCLES ||
+    (durationMs >= SIREN_CONFIG.MIN_PATTERN_DURATION_MS && toggles >= SIREN_CONFIG.MIN_HILO_TOGGLES - 1);
+  const gapScore = Math.min(1, gapHz / (SIREN_CONFIG.MIN_TONE_GAP_HZ * 2));
+  const stabilityScore = Math.max(0, 1 - Math.max(lowSpread, highSpread) / SIREN_CONFIG.HILO_TONE_TOLERANCE_HZ);
+  const timingScore = Math.max(0, 1 - timing.cv / SIREN_CONFIG.MAX_PERIOD_CV);
+  return {
+    label: "hi-lo", confidence: Math.min(1, 0.3 * gapScore + 0.3 * stabilityScore + 0.25 * timingScore + 0.15 * common.quality),
+    ready, durationMs, cycles, toggles
+  };
+}
+
+function analyzeSweep(points, common) {
+  if (points.length < SIREN_CONFIG.MIN_VALID_FRAMES) return null;
+  const frequencies = points.map(point => point.frequencyHz);
+  const rangeHz = Math.max(...frequencies) - Math.min(...frequencies);
+  if (rangeHz < SIREN_CONFIG.MIN_SWEEP_HZ) return null;
+
+  let direction = 0;
+  let extreme = points[0];
+  const turns = [];
+  for (let i = 1; i < points.length; i++) {
+    const point = points[i];
+    if (direction === 0) {
+      const delta = point.frequencyHz - extreme.frequencyHz;
+      if (Math.abs(delta) >= SIREN_CONFIG.MIN_REVERSAL_HZ) {
+        direction = Math.sign(delta);
+        extreme = point;
+      }
+    } else if (direction > 0) {
+      if (point.frequencyHz >= extreme.frequencyHz) extreme = point;
+      else if (extreme.frequencyHz - point.frequencyHz >= SIREN_CONFIG.MIN_REVERSAL_HZ) {
+        turns.push(extreme);
+        direction = -1;
+        extreme = point;
+      }
+    } else {
+      if (point.frequencyHz <= extreme.frequencyHz) extreme = point;
+      else if (point.frequencyHz - extreme.frequencyHz >= SIREN_CONFIG.MIN_REVERSAL_HZ) {
+        turns.push(extreme);
+        direction = 1;
+        extreme = point;
       }
     }
-  } else {
-    sirenLockStartTime = 0;
   }
+  if (turns.length < 2) return null;
+
+  const timing = intervalStats(turns.map(turn => turn.time));
+  const periodMs = timing.mean * 2;
+  const reversals = Math.max(0, turns.length - 1);
+  if (reversals < SIREN_CONFIG.MIN_WAVE_CANDIDATE_REVERSALS ||
+      timing.cv > SIREN_CONFIG.MAX_PERIOD_CV) return null;
+  let label = "none";
+  if (periodMs >= SIREN_CONFIG.YELP_PERIOD_MIN_MS && periodMs <= SIREN_CONFIG.YELP_PERIOD_MAX_MS) label = "yelp";
+  else if (periodMs >= SIREN_CONFIG.WAIL_PERIOD_MIN_MS && periodMs <= SIREN_CONFIG.WAIL_PERIOD_MAX_MS) label = "wail";
+  if (label === "none") return null;
+
+  const durationMs = points[points.length - 1].time - points[0].time;
+  const cycles = reversals / 2;
+  const ready = cycles >= SIREN_CONFIG.MIN_FULL_CYCLES ||
+    (durationMs >= SIREN_CONFIG.MIN_PATTERN_DURATION_MS && reversals >= SIREN_CONFIG.MIN_WAVE_REVERSALS);
+  const rangeScore = Math.min(1, rangeHz / (SIREN_CONFIG.MIN_SWEEP_HZ * 2));
+  const timingScore = Math.max(0, 1 - timing.cv / SIREN_CONFIG.MAX_PERIOD_CV);
+  return {
+    label, confidence: Math.min(1, 0.35 * rangeScore + 0.35 * timingScore + 0.3 * common.quality),
+    ready, durationMs, cycles, reversals, periodMs
+  };
+}
+
+function classifySirenWindow(now) {
+  const frames = sirenHistory.filter(frame => now - frame.time <= SIREN_CONFIG.WINDOW_MS);
+  const points = frames.filter(frame => frame.valid);
+  const validRatio = frames.length ? points.length / frames.length : 0;
+  if (points.length < SIREN_CONFIG.MIN_VALID_FRAMES || validRatio < SIREN_CONFIG.MIN_VALID_RATIO) return null;
+  let maxGap = 0;
+  for (let i = 1; i < points.length; i++) maxGap = Math.max(maxGap, points[i].time - points[i - 1].time);
+  if (maxGap > SIREN_CONFIG.MAX_FRAME_GAP_MS) return null;
+
+  const durationMs = points[points.length - 1].time - points[0].time;
+  const meanProminence = average(points.map(point => point.prominence));
+  const meanFlatness = average(points.map(point => point.flatness));
+  const quality = Math.min(1, validRatio) *
+    Math.max(0, Math.min(1, meanProminence / (SIREN_CONFIG.MIN_PEAK_PROMINENCE * 2))) *
+    Math.max(0, 1 - meanFlatness / SIREN_CONFIG.MAX_SPECTRAL_FLATNESS);
+  const common = { validRatio, quality };
+
+  // Test hi-lo first so regular square-wave alternation is not mistaken for a sweep.
+  const hiLo = analyzeHiLo(points, common);
+  if (hiLo) return Object.assign(hiLo, { durationMs: Math.max(durationMs, hiLo.durationMs) });
+  return analyzeSweep(points, common);
+}
+
+function setSirenState(pattern, now) {
+  const previousState = sirenDetector.state;
+  const previousLabel = sirenDetector.label;
+  if (pattern) {
+    sirenDetector.lastPatternAt = now;
+    if (sirenDetector.state === "CONFIRMED" && sirenDetector.label !== pattern.label) {
+      sirenDetector.state = "CANDIDATE";
+      sirenDetector.candidateLabel = pattern.label;
+      sirenDetector.candidateSince = now;
+    } else if (sirenDetector.state === "IDLE" || sirenDetector.candidateLabel !== pattern.label) {
+      sirenDetector.state = "CANDIDATE";
+      sirenDetector.candidateLabel = pattern.label;
+      sirenDetector.candidateSince = now;
+    }
+    sirenDetector.confidence = pattern.confidence;
+    if (pattern.ready && pattern.confidence >= SIREN_CONFIG.MIN_CONFIRM_CONFIDENCE) {
+      sirenDetector.state = "CONFIRMED";
+      sirenDetector.label = pattern.label;
+      if (previousState !== "CONFIRMED" || previousLabel !== pattern.label) {
+        const triggerAllowed = !sirenTestMode && (sirenAudioMode === "mic" || sirenAudioMode === "synthetic") &&
+          now - lastSirenTriggerTime >= SIREN_CONFIG.RETRIGGER_COOLDOWN_MS;
+        if (triggerAllowed) {
+          lastSirenTriggerTime = now;
+          toast("Siren pattern confirmed (" + pattern.label + ") — starting simulated preemption.");
+          triggerPreemptionOverride({ confirmed: true, label: pattern.label, confidence: pattern.confidence });
+        }
+      }
+    }
+  } else if (sirenDetector.state !== "IDLE" && now - sirenDetector.lastPatternAt > SIREN_CONFIG.STATE_DROP_MS) {
+    sirenDetector.state = "IDLE";
+    sirenDetector.label = "none";
+    sirenDetector.confidence = 0;
+    sirenDetector.candidateLabel = "none";
+  } else if (sirenDetector.state === "CONFIRMED") {
+    sirenDetector.confidence *= 0.96;
+  }
+  renderSirenReadout(null);
+}
+
+function processSirenFrame(now) {
+  const frame = extractSirenFeatures(now);
+  sirenHistory.push(frame);
+  sirenHistory = sirenHistory.filter(item => now - item.time <= SIREN_CONFIG.WINDOW_MS);
+  setSirenState(classifySirenWindow(now), now);
+  renderSirenReadout(frame);
+  return frame;
 }
 
 function initFFTCanvas() {
   const canvas = $("#siren-fft-canvas");
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
-  const W = canvas.width, H = canvas.height;
+  const width = canvas.width;
+  const height = canvas.height;
 
   function draw() {
     requestAnimationFrame(draw);
-    ctx.clearRect(0, 0, W, H);
+    const now = performance.now();
+    if (isMicActive && analyser && now - lastSirenSampleAt >= SIREN_CONFIG.SAMPLE_INTERVAL_MS) {
+      lastSirenSampleAt = now;
+      processSirenFrame(now);
+    }
 
-    // Subtle background grid
+    ctx.clearRect(0, 0, width, height);
     ctx.strokeStyle = "rgba(56, 189, 248, 0.08)";
-    ctx.lineWidth = 1;
-    for (let x = 0; x < W; x += 35) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    for (let x = 0; x < width; x += 35) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
     }
-    for (let y = 0; y < H; y += 22) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-    }
-
     if (analyser && isMicActive) {
-      const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-      analyser.getByteFrequencyData(dataArray);
-
-      const barWidth = (W / bufferLength) * 2.3;
-      let inBandEnergy = 0, totalEnergy = 0, inBandCount = 0;
-      const nyquist = (audioCtx.sampleRate || 48000) / 2;
-
-      for (let i = 0; i < bufferLength; i++) {
-        const val = dataArray[i];
-        totalEnergy += val;
-        const freq = (i / bufferLength) * nyquist;
-        const isInBand = freq >= 650 && freq <= 1450;
-
-        if (isInBand) {
-          inBandEnergy += val;
-          inBandCount++;
-        }
-
-        const barHeight = (val / 255) * (H - 14);
-        const x = i * barWidth;
-        const y = H - barHeight;
-
-        if (isInBand) {
-          ctx.fillStyle = val > 150 ? "#ff707d" : "#10b981";
-          ctx.shadowColor = val > 150 ? "#ff707d" : "#10b981";
-          ctx.shadowBlur = 8;
-        } else {
-          ctx.fillStyle = "rgba(56, 189, 248, 0.35)";
-          ctx.shadowBlur = 0;
-        }
-        ctx.fillRect(x, y, Math.max(1, barWidth - 1.5), barHeight);
+      analyser.getByteFrequencyData(sirenByteData);
+      const binHz = audioCtx.sampleRate / analyser.fftSize;
+      const first = Math.ceil(SIREN_CONFIG.SEARCH_MIN_HZ / binHz);
+      const last = Math.min(sirenByteData.length - 1, Math.floor(SIREN_CONFIG.SEARCH_MAX_HZ / binHz));
+      const barWidth = width / Math.max(1, last - first + 1);
+      for (let i = first; i <= last; i++) {
+        const barHeight = (sirenByteData[i] / 255) * (height - 12);
+        ctx.fillStyle = "#10b981";
+        ctx.fillRect((i - first) * barWidth, height - barHeight, Math.max(1, barWidth - 1), barHeight);
       }
-      ctx.shadowBlur = 0;
-
-      const avgInBand = inBandCount > 0 ? (inBandEnergy / inBandCount) : 0;
-      const avgTotal = bufferLength > 0 ? (totalEnergy / bufferLength) : 0;
-      const ratio = avgTotal > 5 ? (avgInBand / Math.max(avgTotal, 1)) : 0;
-
-      let conf = 0;
-      if (avgInBand > 45) {
-        conf = Math.min(100, Math.round(Math.min(ratio * 48, 100) * (avgInBand / 190)));
-      }
-      sirenConfidence = conf;
-    } else {
-      // Idle ambient baseline spectrum
-      const time = Date.now() * 0.003;
-      const bars = 48;
-      const barWidth = W / bars;
-      for (let i = 0; i < bars; i++) {
-        const freqRatio = i / bars;
-        const isSirenBand = freqRatio >= 0.18 && freqRatio <= 0.42;
-        const baseHeight = 10 + Math.sin(time + i * 0.3) * 8 + Math.cos(time * 0.7 + i * 0.15) * 5;
-        const barHeight = Math.max(4, baseHeight);
-        const x = i * barWidth;
-        const y = H - barHeight;
-
-        ctx.fillStyle = isSirenBand ? "rgba(16, 185, 129, 0.42)" : "rgba(56, 189, 248, 0.2)";
-        ctx.fillRect(x, y, barWidth - 2, barHeight);
-      }
-      sirenConfidence = 0;
     }
-
-    // Siren Band 650Hz–1450Hz Highlighted Overlay
-    const bandStart = W * 0.18;
-    const bandWidth = W * 0.24;
-    ctx.fillStyle = "rgba(16, 185, 129, 0.07)";
-    ctx.fillRect(bandStart, 0, bandWidth, H);
-    ctx.strokeStyle = "rgba(16, 185, 129, 0.35)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(bandStart, 0, bandWidth, H);
-
-    ctx.fillStyle = "#34d399";
-    ctx.font = "8px 'JetBrains Mono', monospace";
-    ctx.fillText("SIREN BAND 650Hz–1450Hz", bandStart + 4, 12);
-
-    // Update confidence badge
-    if ($("#siren-confidence")) {
-      $("#siren-confidence").textContent = `${sirenConfidence}%`;
-      $("#siren-confidence").style.color = sirenConfidence >= 65 ? "#34d399" : (sirenConfidence >= 35 ? "#fbbf24" : "#94a3b8");
-    }
-
-    checkSirenTrigger();
+    ctx.fillStyle = "rgba(16, 185, 129, 0.75)";
+    ctx.font = "8px monospace";
+    ctx.fillText("SEARCH 500–1800 Hz", 6, 11);
   }
   draw();
 }
 
-function startSyntheticSiren() {
-  try {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === "suspended") audioCtx.resume();
+function stopGeneratedSignal() {
+  if (activeSignalStopTimer) clearTimeout(activeSignalStopTimer);
+  activeSignalStopTimer = null;
+  activeSignalNodes.forEach(node => {
+    try { if (typeof node.stop === "function") node.stop(); } catch (error) {}
+    try { node.disconnect(); } catch (error) {}
+  });
+  activeSignalNodes = [];
+  if (sirenAudioMode === "test" || sirenAudioMode === "synthetic") {
+    isMicActive = false;
+    sirenAudioMode = "idle";
+    setTimeout(() => {
+      if (sirenAudioMode === "idle") resetSirenDetector();
+    }, SIREN_CONFIG.STATE_DROP_MS);
+  }
+}
 
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 256;
+function startSirenSignal(name, options) {
+  const settings = options || {};
+  if (micStream && sirenAudioMode === "mic") {
+    toast("Stop the live microphone before playing a test signal.");
+    return false;
+  }
+  stopGeneratedSignal();
+  ensureSirenAnalyser();
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  resetSirenDetector();
+  const spec = SIREN_CONFIG.TEST_SIGNALS[name];
+  if (!spec) return false;
+  sirenTestMode = !!settings.testMode;
+  sirenAudioMode = settings.testMode ? "test" : "synthetic";
+  isMicActive = true;
 
-    synthOsc = audioCtx.createOscillator();
-    synthGain = audioCtx.createGain();
-    synthOsc.type = "sawtooth";
-    synthGain.gain.value = 0.08;
+  const output = audioCtx.createGain();
+  output.gain.value = SIREN_CONFIG.TEST_OUTPUT_GAIN;
+  output.connect(audioCtx.destination);
+  activeSignalNodes.push(output);
 
-    synthLfo = audioCtx.createOscillator();
-    const lfoGain = audioCtx.createGain();
-    synthLfo.frequency.value = 0.8;
-    lfoGain.gain.value = 350;
+  function connectTone(frequency, waveform) {
+    const oscillator = audioCtx.createOscillator();
+    oscillator.type = waveform || "sine";
+    oscillator.frequency.value = frequency;
+    oscillator.connect(analyser);
+    oscillator.connect(output);
+    activeSignalNodes.push(oscillator);
+    oscillator.start();
+    return oscillator;
+  }
 
-    synthOsc.frequency.value = 1050;
-    synthLfo.connect(lfoGain);
-    lfoGain.connect(synthOsc.frequency);
-    synthLfo.start();
+  if (name === "noise") {
+    const length = audioCtx.sampleRate * 2;
+    const buffer = audioCtx.createBuffer(1, length, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    source.connect(analyser);
+    source.connect(output);
+    source.start();
+    activeSignalNodes.push(source);
+  } else if (name === "chord") {
+    spec.frequenciesHz.forEach(frequency => connectTone(frequency, spec.waveform));
+  } else if (name === "horn") {
+    connectTone(spec.frequencyHz, spec.waveform);
+  } else {
+    const carrier = connectTone(spec.baseHz, "sine");
+    const lfo = audioCtx.createOscillator();
+    const depth = audioCtx.createGain();
+    lfo.type = spec.waveform;
+    lfo.frequency.value = 1 / spec.periodSeconds;
+    depth.gain.value = spec.deviationHz;
+    lfo.connect(depth);
+    depth.connect(carrier.frequency);
+    lfo.start();
+    activeSignalNodes.push(lfo, depth);
+  }
 
-    synthOsc.connect(analyser);
-    analyser.connect(synthGain);
-    synthGain.connect(audioCtx.destination);
-    synthOsc.start();
-
-    isMicActive = true;
-    if ($("#btn-mic-toggle")) $("#btn-mic-toggle").innerHTML = "⏹️ Stop Siren (Synthetic)";
-    if ($("#siren-status-badge")) {
-      $("#siren-status-badge").className = "status-tag in-progress";
-      $("#siren-status-badge").textContent = "Synthetic Siren Active";
+  renderSirenReadout(null);
+  if (!settings.selfCheck) {
+    const status = $("#siren-test-playing");
+    if (status) status.textContent = (settings.testMode ? "Playing test signal: " : "Running synthetic fallback: ") +
+      name + " locally; no audio is uploaded.";
+    if (settings.testMode) {
+      activeSignalStopTimer = setTimeout(stopGeneratedSignal, SIREN_CONFIG.TEST_SIGNAL_DURATION_MS);
     }
-    toast("🎙️ Live Mic unavailable — Running Synthetic Doppler Siren demo");
-  } catch (err) {
-    console.error("Synthetic siren error:", err);
+  }
+  return true;
+}
+
+function startSyntheticSiren() {
+  if (startSirenSignal("wail", { testMode: false })) {
+    sirenTestMode = false;
+    sirenAudioMode = "synthetic";
+    if ($("#btn-mic-toggle")) $("#btn-mic-toggle").textContent = "Stop Synthetic Siren";
+    toast("Microphone unavailable — running a local synthetic wail.");
   }
 }
 
@@ -563,62 +894,110 @@ async function toggleMic() {
     stopMic();
     return;
   }
-
   try {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    ensureSirenAnalyser();
     if (audioCtx.state === "suspended") await audioCtx.resume();
-
     if (!micPermissionFailed && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       try {
         micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 256;
-        const source = audioCtx.createMediaStreamSource(micStream);
-        source.connect(analyser);
+        micSource = audioCtx.createMediaStreamSource(micStream);
+        micSource.connect(analyser);
+        sirenAudioMode = "mic";
+        sirenTestMode = false;
         isMicActive = true;
-        if ($("#btn-mic-toggle")) $("#btn-mic-toggle").innerHTML = "⏹️ Stop Live Mic";
-        if ($("#siren-status-badge")) {
-          $("#siren-status-badge").className = "status-tag resolved";
-          $("#siren-status-badge").textContent = "Listening (Live Mic)";
-        }
-        toast("🎙️ Live Microphone FFT Spectrum Active");
+        resetSirenDetector();
+        if ($("#btn-mic-toggle")) $("#btn-mic-toggle").textContent = "Stop Live Mic";
+        toast("Live microphone analysis active. Audio stays in this browser.");
         return;
-      } catch (micErr) {
-        console.warn("Microphone access failed/denied, activating synthetic Doppler siren backup:", micErr);
+      } catch (error) {
         micPermissionFailed = true;
       }
     }
     startSyntheticSiren();
-  } catch (e) {
-    console.warn("AudioContext error, activating synthetic siren backup:", e);
+  } catch (error) {
+    console.warn("Could not start siren audio input:", error);
     startSyntheticSiren();
   }
 }
 
 function stopMic() {
+  stopGeneratedSignal();
+  if (micSource) {
+    try { micSource.disconnect(); } catch (error) {}
+    micSource = null;
+  }
   if (micStream) {
-    micStream.getTracks().forEach(t => t.stop());
+    micStream.getTracks().forEach(track => track.stop());
     micStream = null;
   }
-  if (synthOsc) {
-    try {
-      synthOsc.stop();
-      synthOsc.disconnect();
-      if (synthLfo) { synthLfo.stop(); synthLfo.disconnect(); }
-    } catch (e) {}
-    synthOsc = null;
-    synthLfo = null;
-  }
   isMicActive = false;
-  sirenConfidence = 0;
-  if ($("#btn-mic-toggle")) $("#btn-mic-toggle").innerHTML = "🎙️ Start Live Siren Mic (FFT)";
-  if ($("#siren-status-badge")) {
-    $("#siren-status-badge").className = "status-tag in-progress";
-    $("#siren-status-badge").textContent = "Acoustic Standby";
-  }
-  if ($("#siren-confidence")) $("#siren-confidence").textContent = "0%";
-  toast("Mic stopped");
+  sirenAudioMode = "idle";
+  sirenTestMode = false;
+  resetSirenDetector();
+  if ($("#btn-mic-toggle")) $("#btn-mic-toggle").textContent = "🎙️ Start Live Siren Mic (FFT)";
+  renderSirenReadout(null);
 }
+
+function initSirenTestPanel() {
+  const panel = $("#siren-test-panel");
+  if (!panel) return;
+  const enabled = new URLSearchParams(window.location.search).get("dev") === "1";
+  panel.hidden = !enabled;
+  panel.querySelectorAll("[data-siren-test]").forEach(button => {
+    button.addEventListener("click", () => startSirenSignal(button.dataset.sirenTest, { testMode: true }));
+  });
+  const selfCheckButton = $("#siren-self-check");
+  if (selfCheckButton) selfCheckButton.addEventListener("click", runSirenSelfCheck);
+}
+
+function waitForSirenTest(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function runSirenSelfCheck() {
+  if (micStream) {
+    console.warn("Siren self-check: stop the live microphone first.");
+    return;
+  }
+  const cases = [
+    { name: "wail", expected: "wail" },
+    { name: "yelp", expected: "yelp" },
+    { name: "hiLo", expected: "hi-lo" },
+    { name: "horn", expected: null },
+    { name: "noise", expected: null },
+    { name: "chord", expected: null }
+  ];
+  const results = [];
+  console.group("DOME Flow siren detector self-check");
+  for (const testCase of cases) {
+    resetSirenDetector();
+    startSirenSignal(testCase.name, { testMode: true, selfCheck: true });
+    await waitForSirenTest(SIREN_CONFIG.TEST_SIGNAL_DURATION_MS);
+    const confirmed = sirenDetector.state === "CONFIRMED";
+    const passed = testCase.expected
+      ? confirmed && sirenDetector.label === testCase.expected
+      : !confirmed;
+    const result = {
+      signal: testCase.name,
+      expected: testCase.expected || "never confirmed",
+      actual: confirmed ? sirenDetector.label : sirenDetector.state,
+      confidence: Number(sirenDetector.confidence.toFixed(2)),
+      result: passed ? "PASS" : "FAIL"
+    };
+    results.push(result);
+    console.log(result.result + " — " + result.signal, result);
+    stopGeneratedSignal();
+    resetSirenDetector();
+    await waitForSirenTest(SIREN_CONFIG.SAMPLE_INTERVAL_MS * 2);
+  }
+  console.table(results);
+  console.groupEnd();
+  const status = $("#siren-test-playing");
+  if (status) status.textContent = "Self-check finished. See the browser console for PASS/FAIL.";
+}
+
+window.runSirenSelfCheck = runSirenSelfCheck;
+
 
 function initModuleA() {
   const inputs = ["#preempt-cars", "#preempt-trucks", "#preempt-bikes", "#preempt-dist", "#preempt-speed"];
@@ -648,13 +1027,8 @@ function initModuleA() {
   if ($("#btn-trigger-preempt")) $("#btn-trigger-preempt").onclick = triggerPreemptionOverride;
   if ($("#btn-mic-toggle")) $("#btn-mic-toggle").onclick = toggleMic;
 
-  if ($("#siren-threshold")) {
-    $("#siren-threshold").addEventListener("input", e => {
-      if ($("#thresh-val")) $("#thresh-val").textContent = `${e.target.value}%`;
-    });
-  }
-
   initFFTCanvas();
+  initSirenTestPanel();
   updateLiveMath();
 }
 
