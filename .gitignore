@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 .vercel
 .env
+*.zip
+.vscode/
