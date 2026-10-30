@@ -68,11 +68,130 @@ RETENTION_CONFIG = {
 
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
+# Corridor and Junctions Data Configuration
+CORRIDOR_FILE = os.path.join(os.path.dirname(__file__), "data", "corridor.geojson")
+JUNCTIONS_FILE = os.path.join(os.path.dirname(__file__), "data", "junctions.json")
+
+corridor_data = None
+corridor_coords = []
+corridor_chainages = []
+corridor_total_length_m = 0.0
+
+def load_corridor_data():
+    global corridor_data, corridor_coords, corridor_chainages, corridor_total_length_m
+    if os.path.exists(CORRIDOR_FILE):
+        try:
+            with open(CORRIDOR_FILE, "r", encoding="utf-8") as f:
+                corridor_data = json.load(f)
+            for feature in corridor_data.get("features", []):
+                if feature.get("geometry", {}).get("type") == "LineString":
+                    corridor_coords = feature["geometry"]["coordinates"]  # [[lon, lat], ...]
+                    props = feature.get("properties", {})
+                    corridor_chainages = props.get("chainages", [])
+                    corridor_total_length_m = float(props.get("length_m", 0.0))
+                    break
+        except Exception as e:
+            print(f"[!] Warning: failed to load corridor.geojson: {e}")
+
+load_corridor_data()
+
+class RoadSnapResult(dict):
+    """Result object supporting both dict access (res['chainage_m']) and tuple unpacking."""
+    def __init__(self, chainage_m, lateral_distance_m, snapped_lat, snapped_lon, road_bearing_deg):
+        super().__init__(
+            chainage_m=chainage_m,
+            lateral_distance_m=lateral_distance_m,
+            snapped_lat=snapped_lat,
+            snapped_lon=snapped_lon,
+            road_bearing_deg=road_bearing_deg
+        )
+        self.chainage_m = chainage_m
+        self.lateral_distance_m = lateral_distance_m
+        self.snapped_lat = snapped_lat
+        self.snapped_lon = snapped_lon
+        self.road_bearing_deg = road_bearing_deg
+
+    def __iter__(self):
+        return iter((self.chainage_m, self.lateral_distance_m))
+
+def snap_to_road(lat, lon):
+    """
+    Snaps a geographic coordinate (lat, lon) to the corridor polyline.
+    Returns RoadSnapResult containing chainage_m, lateral_distance_m, snapped_lat, snapped_lon, and road_bearing_deg.
+    Can be unpacked as `chainage_m, lateral_dist = snap_to_road(lat, lon)`.
+    """
+    if not corridor_coords or not corridor_chainages:
+        return RoadSnapResult(0.0, 0.0, float(lat), float(lon), 0.0)
+
+    best_dist = float("inf")
+    best_chainage = 0.0
+    best_bearing = 0.0
+    best_lat = float(lat)
+    best_lon = float(lon)
+
+    for i in range(len(corridor_coords) - 1):
+        lon1, lat1 = corridor_coords[i]
+        lon2, lat2 = corridor_coords[i+1]
+        c1 = corridor_chainages[i]
+        c2 = corridor_chainages[i+1]
+
+        mid_lat_rad = math.radians((lat1 + lat2) / 2.0)
+        dx = (lon2 - lon1) * math.cos(mid_lat_rad) * 111320.0
+        dy = (lat2 - lat1) * 111320.0
+        seg_len_sq = dx * dx + dy * dy
+
+        if seg_len_sq <= 1e-6:
+            t = 0.0
+        else:
+            px = (lon - lon1) * math.cos(mid_lat_rad) * 111320.0
+            py = (lat - lat1) * 111320.0
+            t = max(0.0, min(1.0, (px * dx + py * dy) / seg_len_sq))
+
+        proj_lon = lon1 + t * (lon2 - lon1)
+        proj_lat = lat1 + t * (lat2 - lat1)
+        lat_dist = _distance_m(lat, lon, proj_lat, proj_lon)
+
+        if lat_dist < best_dist:
+            best_dist = lat_dist
+            best_chainage = c1 + t * (c2 - c1)
+            best_bearing = _bearing_deg(lat1, lon1, lat2, lon2)
+            best_lat = proj_lat
+            best_lon = proj_lon
+
+    return RoadSnapResult(
+        round(best_chainage, 1),
+        round(best_dist, 1),
+        round(best_lat, 6),
+        round(best_lon, 6),
+        round(best_bearing, 1)
+    )
+
+def chainage_to_latlon(chainage_m):
+    """
+    Given a chainage distance in metres along the corridor from Tumakuru end, returns (lat, lon).
+    """
+    if not corridor_coords or not corridor_chainages:
+        return (13.3401, 77.1006)
+    if chainage_m <= 0:
+        return (corridor_coords[0][1], corridor_coords[0][0])
+    if chainage_m >= corridor_total_length_m:
+        return (corridor_coords[-1][1], corridor_coords[-1][0])
+
+    for i in range(len(corridor_chainages) - 1):
+        c1, c2 = corridor_chainages[i], corridor_chainages[i+1]
+        if c1 <= chainage_m <= c2:
+            seg_len = c2 - c1
+            t = (chainage_m - c1) / seg_len if seg_len > 1e-6 else 0.0
+            lon1, lat1 = corridor_coords[i]
+            lon2, lat2 = corridor_coords[i+1]
+            return (round(lat1 + t * (lat2 - lat1), 6), round(lon1 + t * (lon2 - lon1), 6))
+    return (corridor_coords[-1][1], corridor_coords[-1][0])
+
 JUNCTION_ARM_BEARINGS = {
-    "J1": {"N": 0, "E": 90, "S": 180, "W": 270},
-    "J2": {"N": 10, "E": 95, "S": 190, "W": 275},
-    "J3": {"N": 350, "E": 85, "S": 170, "W": 265},
-    "J4": {"N": 5, "E": 100, "S": 185, "W": 280}
+    "J1": {"N": 8, "E": 278, "S": 188, "W": 98},
+    "J2": {"N": 181, "E": 91, "S": 1, "W": 271},
+    "J3": {"N": 277, "E": 187, "S": 97, "W": 7},
+    "J4": {"N": 189, "E": 99, "S": 9, "W": 279}
 }
 
 vehicle_registry = {}
@@ -549,57 +668,95 @@ def run_harm_self_checks():
     return [{"name": name, "expected": expected, "actual": actual, "passed": expected == actual}
             for name, expected, actual in results]
 
-# NH-206 Junctions State (CIT Gubbi to Tumakuru Corridor)
-junctions = [
-    {
-        "id": "J1",
-        "name": "CIT Campus Gate (NH-206)",
-        "signal_state": "GREEN",
-        "cars": 12,
-        "trucks": 4,
-        "bikes": 18,
-        "auto_rickshaws": 0,
-        "lat": 13.3120,
-        "lng": 76.9450,
-        "downstream_id": "J2"
-    },
-    {
-        "id": "J2",
-        "name": "Gubbi Town Cross Junction",
-        "signal_state": "RED",
-        "cars": 24,
-        "trucks": 8,
-        "bikes": 35,
-        "auto_rickshaws": 0,
-        "lat": 13.3110,
-        "lng": 76.9410,
-        "downstream_id": "J3"
-    },
-    {
-        "id": "J3",
-        "name": "Nittur Highway Market Bottleneck",
-        "signal_state": "RED",
-        "cars": 19,
-        "trucks": 7,
-        "bikes": 26,
-        "auto_rickshaws": 0,
-        "lat": 13.3080,
-        "lng": 76.9200,
-        "downstream_id": "J4"
-    },
-    {
-        "id": "J4",
-        "name": "Batawadi – Tumakuru Entry Junction",
-        "signal_state": "GREEN",
-        "cars": 28,
-        "trucks": 9,
-        "bikes": 42,
-        "auto_rickshaws": 0,
-        "lat": 13.3400,
-        "lng": 77.1000,
-        "downstream_id": None
-    }
-]
+# NH-206 Junctions State (Tumakuru – Gubbi – Nittur Corridor)
+# Loaded dynamically from data/junctions.json with robust fallback
+def _load_initial_junctions():
+    if os.path.exists(JUNCTIONS_FILE):
+        try:
+            with open(JUNCTIONS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list) and len(data) > 0:
+                    for j in data:
+                        j["lat"] = float(j["lat"])
+                        j["lng"] = float(j.get("lon", j.get("lng", 76.945)))
+                        j["lon"] = j["lng"]
+                        if "arm_bearings" in j:
+                            JUNCTION_ARM_BEARINGS[j["id"]] = j["arm_bearings"]
+                    return data
+        except Exception as e:
+            print(f"[!] Warning: failed to load junctions.json: {e}")
+    # Fallback default if junctions.json is not yet created
+    return [
+        {
+            "id": "J1",
+            "name": "Batawadi – Tumakuru Entry Junction",
+            "signal_state": "GREEN",
+            "cars": 28,
+            "trucks": 9,
+            "bikes": 42,
+            "auto_rickshaws": 0,
+            "lat": 13.3401,
+            "lng": 77.1006,
+            "lon": 77.1006,
+            "chainage_m": 0.0,
+            "signalised": "true",
+            "downstream_id": "J2",
+            "arm_bearings": {"W": 98, "E": 278, "N": 8, "S": 188}
+        },
+        {
+            "id": "J2",
+            "name": "CIT Campus Gate (NH-206)",
+            "signal_state": "RED",
+            "cars": 14,
+            "trucks": 5,
+            "bikes": 22,
+            "auto_rickshaws": 0,
+            "lat": 13.3120,
+            "lng": 76.9450,
+            "lon": 76.9450,
+            "chainage_m": 18970.0,
+            "signalised": "proposed",
+            "downstream_id": "J3",
+            "arm_bearings": {"W": 271, "E": 91, "N": 181, "S": 1}
+        },
+        {
+            "id": "J3",
+            "name": "Gubbi Town Cross (NH-206)",
+            "signal_state": "RED",
+            "cars": 26,
+            "trucks": 8,
+            "bikes": 38,
+            "auto_rickshaws": 0,
+            "lat": 13.3096,
+            "lng": 76.9401,
+            "lon": 76.9401,
+            "chainage_m": 19510.0,
+            "signalised": "proposed",
+            "downstream_id": "J4",
+            "arm_bearings": {"W": 7, "E": 187, "N": 277, "S": 97}
+        },
+        {
+            "id": "J4",
+            "name": "Nittur Highway Market Bottleneck",
+            "signal_state": "RED",
+            "cars": 20,
+            "trucks": 7,
+            "bikes": 29,
+            "auto_rickshaws": 0,
+            "lat": 13.3204,
+            "lng": 76.8620,
+            "lon": 76.8620,
+            "chainage_m": 28521.0,
+            "signalised": "proposed",
+            "downstream_id": None,
+            "arm_bearings": {"W": 279, "E": 99, "N": 189, "S": 9}
+        }
+    ]
+
+junctions = _load_initial_junctions()
+for j in junctions:
+    if "arm_bearings" in j:
+        JUNCTION_ARM_BEARINGS[j["id"]] = j["arm_bearings"]
 
 for junction in junctions:
     update_junction_queue_estimate(junction)
@@ -1878,6 +2035,20 @@ def summary():
     with lock:
         data = get_summary_dict()
     return jsonify(data)
+
+@app.get("/api/corridor")
+def get_corridor():
+    """Returns the road GeoJSON, configured junction candidates, and total length."""
+    with lock:
+        return jsonify({
+            "ok": True,
+            "corridor_name": "NH-206 (Tumakuru - Gubbi - Nittur)",
+            "road": corridor_data,
+            "junctions": junctions,
+            "total_length_m": corridor_total_length_m,
+            "total_length_km": round(corridor_total_length_m / 1000.0, 2),
+            "scope_note": "Prototype scope: Tumakuru - Gubbi - Nittur corridor only."
+        })
 
 # ==========================================
 # 2. STEP 2: S2 REST ENDPOINTS

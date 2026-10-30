@@ -7,6 +7,37 @@ DOME Flow is a Flask-based traffic management demonstration for the NH-206 Gubbi
 
 This is a simulation. It does not connect to real traffic signals or municipal work-order systems. The backend stores demo state in memory, so state resets when the server process restarts.
 
+## Corridor Scope: Tumakuru – Gubbi – Nittur (NH-206)
+
+This system is built around one real-world highway corridor in Karnataka, India: **NH-206 (BH Road / NH-73)** spanning **28.52 km** from the Tumakuru urban junction through Gubbi town to Nittur:
+- **Chainage 0.0 km:** Tumakuru Entry (Batawadi NH-48 / NH-206 Cross)
+- **Chainage 18.97 km:** CIT Campus Gate (NH-206)
+- **Chainage 19.51 km:** Gubbi Town Cross (NH-206 / Chandrashekar Circle)
+- **Chainage 28.52 km:** Nittur Highway Market Bottleneck (NH-206)
+
+### Data Source & Licence
+- **Map & Highway Geometry:** &copy; [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors.
+- **Licence:** Open Database License ([ODbL](https://opendatacommons.org/licenses/odbl/)).
+- **Cartography & Leaflet Tiles:** Standard OpenStreetMap tile service with mandatory attribution: `© OpenStreetMap contributors`.
+
+### Real vs. Proposed Junction Signals
+Per strict deployment guidelines, the system does not invent traffic signals that OpenStreetMap does not verify:
+- **J1 · Batawadi – Tumakuru Entry Junction (`signalised: true`):** A real, physically existing traffic signal at the major NH-48 / NH-206 interchange in Tumakuru.
+- **J2 · CIT Campus Gate (`signalised: proposed`):** Proposed intelligent preemption node protecting academic and transit vehicles entering the national highway.
+- **J3 · Gubbi Town Cross (`signalised: proposed`):** Proposed smart ITS intersection for the congested town centre bottleneck.
+- **J4 · Nittur Highway Market Bottleneck (`signalised: proposed`):** Proposed smart preemption bottleneck for highway queue clearance.
+
+### How to Regenerate Corridor Data
+An offline tool (`tools/fetch_corridor.py`, Python standard library only) is provided to look up the towns via Nominatim, query OpenStreetMap highway geometry, compute chainage in metres, derive approach arm bearings, and export clean GeoJSON and configuration files:
+
+```powershell
+python tools/fetch_corridor.py
+```
+Outputs:
+- `data/corridor.geojson`: Single continuous ordered polyline with chainages from Tumakuru and junction points.
+- `data/junctions.json`: Server-loaded junction configuration with road-derived approach bearings (`arm_bearings: {"W": ..., "E": ..., "N": ..., "S": ...}`).
+
+
 ## Run locally on Windows
 
 From PowerShell in the project folder:
@@ -52,10 +83,13 @@ The three-hit demonstration counts qualifying requests; it does not validate tha
 
 ## Project files
 
-- `app.py` — Flask routes, demo state, queue-clearance calculation, and REST API.
-- `templates/index.html` — dashboard markup.
-- `static/app.js` — dashboard interactions, microphone analysis, phone motion handling, and API requests.
-- `static/style.css` — dashboard styling and responsive phone layout.
+- `tools/fetch_corridor.py` — Offline OpenStreetMap data fetcher (Python stdlib only, queries Nominatim/Overpass/OSRM).
+- `data/corridor.geojson` — Ordered 28.52 km polyline with chainages in metres and junction/signal points.
+- `data/junctions.json` — Server-loaded junction configuration with road-derived arm bearings.
+- `app.py` — Flask routes, corridor loader, queue-clearance calculation, and REST API.
+- `templates/index.html` — dashboard markup with Leaflet Corridor Map and chainage ruler.
+- `static/app.js` — dashboard interactions, Leaflet map initialization, microphone analysis, and API requests.
+- `static/style.css` — dashboard styling, dark Leaflet popups, and responsive layout.
 - `requirements.txt` — Flask and Gunicorn dependencies.
 - `render.yaml` — Render deployment configuration.
 

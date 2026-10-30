@@ -502,11 +502,17 @@ function renderSummary(data) {
     }).join("");
   }
 
-  // 4. SVG Green Wave Corridor Pulse
+  // 4. SVG & Leaflet Green Wave Corridor Pulse
   const hasPreempt = (data.junctions || []).some(j => j.signal_state === "PREEMPT_GREEN") || ((m.active_green_waves || 0) > 0);
   preemptionActive = (data.junctions || []).some(j => j.signal_state === "PREEMPT_GREEN");
   const gwEl = $("#svg-green-wave-corridor");
   if (gwEl) gwEl.classList.toggle("active", hasPreempt);
+  if (typeof corridorRoadLayer !== "undefined" && corridorRoadLayer) {
+    corridorRoadLayer.setStyle({ color: hasPreempt ? "#10b981" : "#0284c7" });
+  }
+  if (typeof updateCorridorJunctionMarkers === "function") {
+    updateCorridorJunctionMarkers(data.junctions || []);
+  }
 
   // 5. Analytics Congestion Hotspots Dynamic Swap
   if ($("#hotspots-container")) {
@@ -657,6 +663,7 @@ function switchView(id) {
   document.querySelectorAll("[data-view]").forEach(b => b.classList.toggle("active", b.dataset.view === id));
   const titles = {
     overview: "Good morning, operator",
+    "corridor-map": "NH-206 Corridor Map (OpenStreetMap)",
     traffic: "Traffic & incidents",
     manage: "Road management",
     analytics: "Mobility analytics",
@@ -664,6 +671,13 @@ function switchView(id) {
   };
   $("#pageTitle").innerHTML = `${titles[id] || "DOME Flow"} <span>✦</span>`;
   window.scrollTo({ top: 0, behavior: "smooth" });
+  if (id === "corridor-map" || id === "overview") {
+    setTimeout(() => {
+      if (typeof corridorLeafletMap !== "undefined" && corridorLeafletMap) {
+        corridorLeafletMap.invalidateSize();
+      }
+    }, 200);
+  }
 }
 
 // ==========================================
@@ -2389,6 +2403,8 @@ if ($("#refreshBtn")) {
 document.addEventListener("click", e => {
   const b = e.target.closest("[data-incident]");
   if (b) openIncident(b.dataset.incident);
+  const g = e.target.closest("[data-goto]");
+  if (g) switchView(g.dataset.goto);
 });
 
 function drawChart() {
@@ -2417,10 +2433,190 @@ function updateHeaderClock() {
   }
 }
 
+
+// ==========================================
+// 4. CORRIDOR LEAFLET MAP & CHAINAGE RULER
+// ==========================================
+let corridorLeafletMap = null;
+let corridorRoadLayer = null;
+let corridorJunctionMarkers = {};
+let corridorDataCache = null;
+
+async function initCorridorMap() {
+  const mapContainer = $("#corridor-leaflet-map");
+  if (!mapContainer || typeof L === "undefined") return;
+
+  try {
+    const res = await api("/api/corridor");
+    corridorDataCache = res;
+
+    if (!corridorLeafletMap) {
+      corridorLeafletMap = L.map("corridor-leaflet-map", {
+        center: [13.318, 76.980],
+        zoom: 11,
+        minZoom: 9,
+        maxZoom: 18
+      });
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>'
+      }).addTo(corridorLeafletMap);
+
+      const scopeControl = L.control({ position: "topright" });
+      scopeControl.onAdd = function() {
+        const div = L.DomUtil.create("div", "leaflet-scope-pill");
+        div.innerHTML = '<span style="background: rgba(15, 23, 42, 0.9); color: #38bdf8; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 700; border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 4px 12px rgba(0,0,0,0.5);">Prototype scope: Tumakuru - Gubbi - Nittur corridor only.</span>';
+        return div;
+      };
+      scopeControl.addTo(corridorLeafletMap);
+    }
+
+    if (res.road) {
+      if (corridorRoadLayer) corridorLeafletMap.removeLayer(corridorRoadLayer);
+      corridorRoadLayer = L.geoJSON(res.road, {
+        filter: feature => feature.geometry.type === "LineString",
+        style: () => ({
+          color: preemptionActive ? "#10b981" : "#0284c7",
+          weight: 6,
+          opacity: 0.9,
+          lineCap: "round",
+          lineJoin: "round"
+        })
+      }).addTo(corridorLeafletMap);
+
+      if (corridorRoadLayer.getBounds().isValid()) {
+        corridorLeafletMap.fitBounds(corridorRoadLayer.getBounds(), { padding: [30, 30] });
+      }
+    }
+
+    if (res.total_length_m) {
+      const milestones = [0, 5000, 10000, 15000, 20000, 25000, Math.round(res.total_length_m)];
+      const lineCoords = (res.road?.features?.find(f => f.geometry.type === "LineString")?.geometry?.coordinates) || [];
+      const chainages = (res.road?.features?.find(f => f.geometry.type === "LineString")?.properties?.chainages) || [];
+
+      if (lineCoords.length && chainages.length) {
+        milestones.forEach(m => {
+          const km = (m / 1000).toFixed(m === res.total_length_m ? 1 : 0);
+          let lat = 13.34, lon = 77.10;
+          for (let i = 0; i < chainages.length - 1; i++) {
+            if (chainages[i] <= m && m <= chainages[i+1]) {
+              const t = (m - chainages[i]) / (chainages[i+1] - chainages[i] || 1);
+              lon = lineCoords[i][0] + t * (lineCoords[i+1][0] - lineCoords[i][0]);
+              lat = lineCoords[i][1] + t * (lineCoords[i+1][1] - lineCoords[i][1]);
+              break;
+            }
+          }
+          const icon = L.divIcon({
+            className: "corridor-marker-milestone",
+            html: `${km} km`,
+            iconSize: [36, 16],
+            iconAnchor: [18, 8]
+          });
+          L.marker([lat, lon], { icon }).addTo(corridorLeafletMap)
+            .bindTooltip(`Chainage Milestone: ${km} km (${m} m from Tumakuru start)`);
+        });
+      }
+    }
+
+    updateCorridorJunctionMarkers(res.junctions || []);
+
+    document.querySelectorAll(".chainage-pin[data-junction]").forEach(pin => {
+      pin.onclick = () => {
+        openJunctionFromMap(pin.dataset.junction);
+      };
+    });
+
+  } catch (err) {
+    console.error("Failed to initialize corridor map:", err);
+  }
+}
+
+function updateCorridorJunctionMarkers(junctionsList) {
+  if (!corridorLeafletMap || !junctionsList) return;
+
+  junctionsList.forEach(j => {
+    const lat = Number(j.lat), lon = Number(j.lon || j.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+    const isReal = j.signalised === "true";
+    const markerClass = isReal ? "corridor-marker-real" : "corridor-marker-proposed";
+
+    const customIcon = L.divIcon({
+      className: markerClass,
+      html: `<span>${esc(j.id)}</span>`,
+      iconSize: [28, 28],
+      iconAnchor: [14, 14]
+    });
+
+    const popupHtml = `
+      <div class="leaflet-junction-popup">
+        <div class="popup-tag ${isReal ? 'tag-real' : 'tag-proposed'}">
+          ${isReal ? '● REAL TRAFFIC SIGNAL' : '✦ PROPOSED SMART ITS NODE'}
+        </div>
+        <h4>${esc(j.name)}</h4>
+        <div class="popup-meta">
+          <span>ID: <b>${esc(j.id)}</b></span> &nbsp;·&nbsp;
+          <span>Chainage: <b>${Number(j.chainage_m ? j.chainage_m / 1000 : 0).toFixed(1)} km</b></span>
+        </div>
+        <div class="popup-state">
+          <span>Signal Phase: <b class="sig-${(j.signal_state || 'red').toLowerCase()}">${esc(j.signal_state || 'RED')}</b></span> &nbsp;·&nbsp;
+          <span>Queue Flush: <b>${j.t_flush_sec || '—'}s</b></span>
+        </div>
+        <div class="popup-queues">
+          🚗 <b>${j.cars || 0}</b> &nbsp;|&nbsp; 🚚 <b>${j.trucks || 0}</b> &nbsp;|&nbsp; 🛵 <b>${j.bikes || 0}</b>
+        </div>
+        <button class="popup-btn" onclick="openJunctionFromMap('${esc(j.id)}')">Inspect Junction &amp; Queue Card →</button>
+      </div>
+    `;
+
+    if (corridorJunctionMarkers[j.id]) {
+      corridorJunctionMarkers[j.id].setLatLng([lat, lon]);
+      corridorJunctionMarkers[j.id].setIcon(customIcon);
+      corridorJunctionMarkers[j.id].setPopupContent(popupHtml);
+    } else {
+      const marker = L.marker([lat, lon], { icon: customIcon }).addTo(corridorLeafletMap);
+      marker.bindPopup(popupHtml);
+      corridorJunctionMarkers[j.id] = marker;
+    }
+  });
+}
+
+window.openJunctionFromMap = function(junctionId) {
+  if (!junctionId) return;
+
+  const marker = corridorJunctionMarkers[junctionId];
+  if (marker && corridorLeafletMap) {
+    corridorLeafletMap.panTo(marker.getLatLng(), { animate: true, duration: 0.8 });
+    marker.openPopup();
+  }
+
+  const selector = $("#preempt-junction");
+  if (selector) {
+    selector.value = junctionId;
+    updateLiveMath();
+  }
+
+  document.querySelectorAll(".junction-card").forEach(c => {
+    const isTarget = c.dataset.junction === junctionId;
+    c.style.outline = isTarget ? "2px solid #00f0ff" : "none";
+    c.style.boxShadow = isTarget ? "0 0 20px rgba(0, 240, 255, 0.4)" : "none";
+    if (isTarget) {
+      c.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  });
+
+  const jData = (currentSummary?.junctions || []).find(x => x.id === junctionId);
+  const jName = jData ? jData.name : junctionId;
+  const km = jData?.chainage_m ? (jData.chainage_m / 1000).toFixed(1) : "";
+  toast(`Selected: ${junctionId} · ${jName} ${km ? '(' + km + ' km)' : ''}`);
+};
+
 // Bootstrap all modules
 initTopbarAndModals();
 initModuleA();
 initModuleB();
+initCorridorMap();
 load();
 drawChart();
 updateHeaderClock();

@@ -1,0 +1,82 @@
+[
+  {
+    "id": "J1",
+    "name": "Batawadi - Tumakuru Entry Junction",
+    "lat": 13.340294,
+    "lon": 77.100678,
+    "chainage_m": 0.0,
+    "signalised": "true",
+    "downstream_id": "J2",
+    "arm_bearings": {
+      "W": 98,
+      "E": 278,
+      "N": 8,
+      "S": 188
+    },
+    "signal_state": "GREEN",
+    "cars": 28,
+    "trucks": 9,
+    "bikes": 42,
+    "auto_rickshaws": 0
+  },
+  {
+    "id": "J2",
+    "name": "CIT Campus Gate (NH-206)",
+    "lat": 13.309142,
+    "lon": 76.944961,
+    "chainage_m": 18969.9,
+    "signalised": "proposed",
+    "downstream_id": "J3",
+    "arm_bearings": {
+      "W": 271,
+      "E": 91,
+      "N": 181,
+      "S": 1
+    },
+    "signal_state": "RED",
+    "cars": 14,
+    "trucks": 5,
+    "bikes": 22,
+    "auto_rickshaws": 0
+  },
+  {
+    "id": "J3",
+    "name": "Gubbi Town Cross (NH-206)",
+    "lat": 13.309561,
+    "lon": 76.940435,
+    "chainage_m": 19510.1,
+    "signalised": "proposed",
+    "downstream_id": "J4",
+    "arm_bearings": {
+      "W": 7,
+      "E": 187,
+      "N": 277,
+      "S": 97
+    },
+    "signal_state": "RED",
+    "cars": 26,
+    "trucks": 8,
+    "bikes": 38,
+    "auto_rickshaws": 0
+  },
+  {
+    "id": "J4",
+    "name": "Nittur Highway Market Bottleneck",
+    "lat": 13.321049,
+    "lon": 76.862129,
+    "chainage_m": 28521.2,
+    "signalised": "proposed",
+    "downstream_id": null,
+    "arm_bearings": {
+      "W": 279,
+      "E": 99,
+      "N": 189,
+      "S": 9
+    },
+    "signal_state": "RED",
+    "cars": 20,
+    "trucks": 7,
+    "bikes": 29,
+    "auto_rickshaws": 0
+  }
+]

@@ -2573,3 +2573,215 @@ footer span {
     align-items: flex-start;
   }
 }
+
+/* ==========================================
+   CORRIDOR LEAFLET MAP & CHAINAGE RULER
+   ========================================== */
+.scope-note-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  margin-bottom: 16px;
+  border-left: 4px solid #00f0ff;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+.scope-note-banner strong {
+  color: #f1f5f9;
+}
+.scope-pill {
+  background: rgba(0, 240, 255, 0.15);
+  color: #38bdf8;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 240, 255, 0.3);
+}
+
+.corridor-map-container {
+  padding: 16px;
+  margin-bottom: 24px;
+}
+
+#corridor-leaflet-map {
+  background: #0b1424;
+  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.leaflet-container {
+  font-family: inherit;
+}
+.leaflet-popup-content-wrapper {
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(12px);
+  color: #f8fafc;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.7);
+}
+.leaflet-popup-tip {
+  background: rgba(15, 23, 42, 0.95);
+}
+.leaflet-junction-popup h4 {
+  margin: 4px 0 8px 0;
+  font-size: 14px;
+  color: #f8fafc;
+}
+.popup-tag {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+.popup-tag.tag-real {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+.popup-tag.tag-proposed {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+.popup-meta, .popup-state, .popup-queues {
+  font-size: 12px;
+  margin-bottom: 4px;
+  color: #94a3b8;
+}
+.popup-meta b, .popup-state b {
+  color: #f1f5f9;
+}
+.popup-state b.sig-green { color: #34d399; }
+.popup-state b.sig-red { color: #f87171; }
+.popup-state b.sig-preempt_green { color: #00f0ff; }
+.popup-btn {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #0284c7;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+}
+.popup-btn:hover {
+  background: #0369a1;
+}
+
+.chainage-ruler-strip {
+  margin-top: 14px;
+  padding: 14px 18px;
+  background: rgba(15, 23, 42, 0.7);
+}
+.ruler-title {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #94a3b8;
+  margin-bottom: 12px;
+}
+.chainage-bar {
+  position: relative;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  margin-bottom: 18px;
+}
+.chainage-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #0284c7, #00f0ff, #38bdf8);
+  border-radius: 4px;
+  opacity: 0.7;
+}
+.chainage-pin {
+  position: absolute;
+  top: -6px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  z-index: 2;
+}
+.chainage-pin .pin-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #0284c7;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.8);
+}
+.chainage-pin .pin-dot.real {
+  background: #10b981;
+  border-color: #a7f3d0;
+}
+.chainage-pin .pin-dot.proposed {
+  background: #f59e0b;
+  border-color: #fde68a;
+}
+.chainage-pin small {
+  margin-top: 5px;
+  font-size: 10px;
+  white-space: nowrap;
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.85);
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.ruler-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #64748b;
+}
+
+.corridor-marker-real {
+  background: #10b981;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 800;
+  font-size: 11px;
+}
+.corridor-marker-proposed {
+  background: #f59e0b;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 800;
+  font-size: 11px;
+}
+.corridor-marker-milestone {
+  background: #0f172a;
+  border: 1px solid #38bdf8;
+  border-radius: 4px;
+  color: #38bdf8;
+  font-size: 9px;
+  padding: 1px 4px;
+  white-space: nowrap;
+  font-weight: 600;
+}
