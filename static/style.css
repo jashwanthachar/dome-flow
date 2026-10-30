@@ -2815,3 +2815,20 @@ footer span {
   white-space: nowrap;
   font-weight: 600;
 }
+
+/* Pothole & Fleet Telematics Styles */
+.pothole-leaflet-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fleet-sim-box .sim-btn {
+  text-align: left;
+  border-color: rgba(56, 189, 248, 0.3);
+  color: #cbd5e1;
+}
+.fleet-sim-box .sim-btn:hover {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border-color: #38bdf8;
+}

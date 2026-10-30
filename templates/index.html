@@ -483,82 +483,112 @@
           <button class="danger-action-btn" id="btn-trigger-preempt" title="Simulator only in DEMO_AUTO; ADVISORY never changes a phase">🚑 Safety-gated signal request · simulator only</button>
         </div>
 
-        <!-- Right Column: Module B -->
+        <!-- Right Column: Module B - B2B Partner Fleet Pothole Intelligence -->
         <div class="panel glass s2-module-card">
           <div class="panel-heading">
             <div>
-              <div class="section-kicker">MODULE B — ZERO-TOUCH CROWD TELEMATICS</div>
-              <h3>Pothole Blackspot &amp; Inertial Probe</h3>
+              <div class="section-kicker">MODULE B — B2B PARTNER FLEET TELEMATICS</div>
+              <h3>Fleet Pothole Intelligence &amp; PWD Audit</h3>
             </div>
-            <span class="status-tag resolved">3-Hit Shock Count</span>
+            <span class="status-tag live" id="pothole-role-status-badge">Role: PWD Officer</span>
           </div>
 
           <div class="explanation-pill">
-            <span>ⓘ Motion noise filter: Speed &ge; 15 km/h &amp; phone jerk &ge; 15 m/s³ prevents false positives from speed bumps</span>
+            <span>ⓘ B2B Plugin: Telemetry collected strictly from partner commercial fleets (cabs, buses, trucks). Derived on-device events only; zero raw sensor stream, zero microphone access. Partners are write-only.</span>
           </div>
 
-          <div class="s2-form-grid">
-            <div class="form-group full-width">
-              <label for="shock-corridor">Target Corridor Sector</label>
-              <select id="shock-corridor">
-                <option value="nh206" selected>NH-206: Gubbi – Nittur Highway Segment</option>
-                <option value="nh206-cit">NH-206: CIT Campus Approach</option>
-                <option value="nh206-batawadi">NH-206: Batawadi Tumakuru Entry</option>
-                <option value="bengaluru">Bengaluru: Outer Ring Road Sector</option>
-              </select>
+          <!-- Role Gate Bar -->
+          <div class="pothole-role-strip glass" style="margin-top: 12px; padding: 12px; border-radius: 8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span style="font-size:11px; font-weight:700; color:#38bdf8;">ROAD AGENCY ACCESS GATE (PWD / POLICE)</span>
+              <a href="/partner-demo" target="_blank" class="text-button" style="font-size:11px;">Open Partner Fleet App Demo (/partner-demo) ↗</a>
             </div>
-            <div class="form-row-2">
-              <div class="form-group">
-                <label for="shock-jerk">Phone Motion Jerk: <b id="jerk-val">24.5 m/s³</b></label>
-                <input type="range" id="shock-jerk" min="5" max="45" step="0.5" value="24.5">
-              </div>
-              <div class="form-group">
-                <label for="shock-speed">Vehicle Speed: <b id="speed-val">48 km/h</b></label>
-                <input type="range" id="shock-speed" min="5" max="90" step="1" value="48">
-              </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input type="password" id="pothole-role-token" placeholder="Enter PWD_TOKEN or POLICE_TOKEN" value="demo-pwd-token" style="flex:1; background:#0f172a; border:1px solid #334155; color:#fff; padding:6px 10px; border-radius:6px; font-size:12px;">
+              <button class="secondary-btn" id="btn-auth-pwd" style="padding:6px 12px; font-size:11px;" type="button">Auth as PWD</button>
+              <button class="secondary-btn" id="btn-auth-police" style="padding:6px 12px; font-size:11px;" type="button">Auth as Police</button>
+            </div>
+            <div id="pothole-role-message" style="font-size:10px; color:#10b981; margin-top:4px;">
+              Authenticated as PWD role. Full ticket triage &amp; repair verification enabled.
             </div>
           </div>
 
-          <!-- Live Inertial Readout Card -->
-          <div class="inertial-card glass">
-            <div class="inertial-header">
-              <span>INERTIAL PROBE TELEMETRY</span>
-              <span class="live-dot-wrap"><i class="dot green"></i> Ready</span>
+          <!-- Partner Telematics Ingest Stats & Partner-Blind Toggle -->
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px;">
+            <div class="inertial-card glass" style="padding:10px;">
+              <small style="color:#94a3b8; font-size:10px;">REGISTERED FLEET PARTNERS</small>
+              <div style="margin-top:4px; font-size:13px; font-weight:700; color:#e2e8f0;">QuickCabs · CityBus Transit</div>
+              <small style="color:#38bdf8; font-size:10px;" id="pothole-stats-ingest">Accepted: 0 · Rejected: 0</small>
             </div>
-            <div class="inertial-readings">
-              <div class="reading">
-                <small>PHONE MOTION JERK</small>
-                <strong id="live-jerk-readout">24.5 <small>m/s³</small></strong>
+            <div class="inertial-card glass" style="padding:10px;">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <small style="color:#94a3b8; font-size:10px;">PARTNER-BLIND VIEW</small>
+                <input type="checkbox" id="toggle-partner-view">
               </div>
-              <div class="reading">
-                <small>DEMO VEHICLE SPEED</small>
-                <strong id="live-speed-readout">48 <small>km/h</small></strong>
-              </div>
-            </div>
-
-            <!-- 3-Hit Cluster Progress Bar -->
-            <div class="cluster-tracker">
-              <div class="cluster-top">
-                <small>3-HIT PHONE SHOCK COUNT</small>
-                <span id="cluster-status-text">0 / 3 Hits — Listening for Commuter Shocks</span>
-              </div>
-              <div class="cluster-progress-wrap">
-                <div class="cluster-progress-bar" id="cluster-progress-bar" style="width: 0%"></div>
+              <div style="margin-top:4px; font-size:11px; color:#cbd5e1;" id="partner-view-desc">
+                Toggle to simulate external partner perspective (read endpoints return 403 Forbidden).
               </div>
             </div>
           </div>
 
-          <div class="probe-actions">
-            <button class="primary-btn shock-btn" id="btn-sim-shock">💥 Simulate Commuter Pothole Shock (+1 Hit)</button>
-            <button class="secondary-btn sensor-btn" id="btn-motion-sensor">📱 Enable Live Phone Accelerometer</button>
+          <!-- Partner Alert Simulated Preview (Visible when toggle-partner-view checked) -->
+          <div id="partner-view-box" class="glass" style="display:none; margin-top:10px; padding:10px; border:1px dashed #f59e0b; border-radius:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="color:#f59e0b; font-weight:700; font-size:11px;">⚠️ SIMULATED PARTNER FLEET VIEW (/api/partner/alerts)</span>
+              <span style="background:#dc2626; color:#fff; font-size:9px; padding:2px 6px; border-radius:4px; font-weight:700;">403 FORBIDDEN ON RAW RECORDS</span>
+            </div>
+            <div id="partner-alerts-content" style="font-size:11px; color:#e2e8f0; margin-top:6px;">
+              Partner key queries upcoming hazard severity bands ahead within 2 km. Coordinates, ticket IDs, and other partner data are strictly blocked.
+            </div>
           </div>
 
-          <div class="pwd-auto-order glass">
-            <div class="pwd-header">
-              <span class="pwd-badge">PWD AUTO-DISPATCH ACTIVE</span>
-              <small>3 qualifying phone hits = Demo pothole incident</small>
+          <!-- PWD Tickets Table -->
+          <div style="margin-top:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <b style="font-size:12px; color:#e2e8f0;">CORRIDOR POTHOLE TICKETS (NH-206)</b>
+              <button class="text-button" id="btn-refresh-potholes" style="font-size:11px;">Refresh Tickets ⟳</button>
             </div>
-            <p>The third qualifying phone motion hit creates a work-order entry in this demo. It does not verify separate devices or a real road location.</p>
+            <div class="table-container glass" style="max-height:190px; overflow-y:auto; border-radius:8px;">
+              <table style="width:100%; border-collapse:collapse; font-size:11px; text-align:left;">
+                <thead>
+                  <tr style="border-bottom:1px solid #334155; color:#94a3b8;">
+                    <th style="padding:6px;">ID</th>
+                    <th style="padding:6px;">Chainage</th>
+                    <th style="padding:6px;">Severity</th>
+                    <th style="padding:6px;">Conf</th>
+                    <th style="padding:6px;">Groups</th>
+                    <th style="padding:6px;">Status</th>
+                    <th style="padding:6px;">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="pothole-tickets-tbody">
+                  <tr>
+                    <td colspan="7" style="padding:14px; text-align:center; color:#94a3b8;">
+                      No tickets open. Run a fleet simulation pass below or ingest telemetry.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Fleet Simulator & "Try to break it" (?dev=1) -->
+          <div class="fleet-sim-box glass" style="margin-top:14px; padding:12px; border-radius:8px; border:1px solid rgba(56, 189, 248, 0.2);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <b style="font-size:11px; color:#38bdf8;">⚡ FLEET SIMULATOR &amp; "TRY TO BREAK IT" SUITE</b>
+              <button class="primary-btn" id="btn-run-all-tests" style="font-size:10px; padding:4px 10px;">Run 8-Test Suite</button>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+              <button class="secondary-btn sim-btn" data-action="clean_pass" style="font-size:10px; padding:6px;">1. Clean Fleet Pass</button>
+              <button class="secondary-btn sim-btn" data-action="speed_breaker_pass" style="font-size:10px; padding:6px;">2. Speed Breaker Learning</button>
+              <button class="secondary-btn sim-btn" data-action="bus_shake_attack" style="font-size:10px; padding:6px;">3. Bus-Shake Dedupe</button>
+              <button class="secondary-btn sim-btn" data-action="swerve_pass" style="font-size:10px; padding:6px;">4. Swerve Avoidance</button>
+              <button class="secondary-btn sim-btn" data-action="slow_spikes" style="font-size:10px; padding:6px;">5. Slow-Speed Filter</button>
+              <button class="secondary-btn sim-btn" data-action="partner_read_attempt" style="font-size:10px; padding:6px;">6. Partner 403 Read Check</button>
+              <button class="secondary-btn sim-btn" data-action="repair_and_smooth" style="font-size:10px; padding:6px;">7. Repair &amp; 3 Smooth Passes</button>
+              <button class="secondary-btn sim-btn" data-action="repair_failed_pass" style="font-size:10px; padding:6px;">8. Repair-Failed Reopen</button>
+            </div>
+            <div id="test-suite-console" style="margin-top:8px; display:none; background:#020617; border:1px solid #1e293b; border-radius:6px; padding:8px; font-family:monospace; font-size:10px; color:#38bdf8; max-height:130px; overflow-y:auto;"></div>
           </div>
         </div>
       </div>

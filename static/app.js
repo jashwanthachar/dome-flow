@@ -2207,166 +2207,288 @@ function initModuleA() {
 }
 
 // ==========================================
-// 4. MODULE B: CROWD-TELEMATICS PROBE WIRING
+// ==========================================
+// 4. MODULE B: B2B PARTNER FLEET POTHOLE INTELLIGENCE
 // ==========================================
 
-async function triggerSimShock(source = "simulator") {
-  const corridor = $("#shock-corridor")?.value || (currentSummary?.active_scenario || "nh206");
-  const z_jerk = parseFloat($("#shock-jerk")?.value || 24.5);
-  const speed_kmh = parseFloat($("#shock-speed")?.value || 48);
+let currentRoleToken = "demo-pwd-token";
+let currentPotholeRole = "PWD";
+let potholeMapMarkers = [];
 
+async function fetchPotholesDashboard() {
+  const token = $("#pothole-role-token")?.value || currentRoleToken;
   try {
-    const res = await api("/api/telematics/shock", {
-      method: "POST",
-      body: JSON.stringify({
-        corridor,
-        jerk_mps3: z_jerk,
-        speed_kmh,
-        source,
-        probe_id: source === "motion" ? motionProbeId : undefined
-      })
-    });
-
-    if (res.status === "filtered_noise") {
-      toast("⚠️ Ignored by Spatial Filter: Speed < 15 km/h or Jerk < 15 m/s³");
-    } else if (res.status === "clustering") {
-      const pct = Math.round((res.hits / 3) * 100);
-      if ($("#cluster-progress-bar")) $("#cluster-progress-bar").style.width = `${pct}%`;
-      if ($("#cluster-status-text")) $("#cluster-status-text").textContent = `${res.hits} / 3 Hits — Shock count accumulating`;
-      toast(`💥 Shock Registered (${res.hits}/3) — Shock count accumulating`);
-    } else if (res.status === "verified_blackspot") {
-      if ($("#cluster-progress-bar")) $("#cluster-progress-bar").style.width = "100%";
-      if ($("#cluster-status-text")) $("#cluster-status-text").textContent = "3 / 3 Verified! PWD Work Order Dispatched";
-      await load();
-      toast("💥 Verified Pothole Blackspot Created & PWD Work Order Dispatched!");
+    const res = await api(`/api/potholes/dashboard?token=${encodeURIComponent(token)}`);
+    if (res.ok) {
+      currentPotholeRole = res.role;
+      if ($("#pothole-role-status-badge")) {
+        $("#pothole-role-status-badge").textContent = `Role: ${res.role} Officer`;
+        $("#pothole-role-status-badge").className = "status-tag live";
+      }
+      if ($("#pothole-role-message")) {
+        $("#pothole-role-message").textContent = `✓ Authenticated as ${res.role}. Full ticket triage & repair audit authorized.`;
+        $("#pothole-role-message").style.color = "#10b981";
+      }
+      renderPotholeTickets(res.tickets || []);
+      renderPartnerStats(res.partners || []);
+      renderPotholeMapMarkers();
     }
   } catch (err) {
-    console.error("Shock probe error:", err);
-    toast("Could not submit telematics shock probe");
-  }
-}
-
-let isMotionActive = false;
-let lastAcc = null;
-let lastMotionTime = Date.now();
-let motionHitArmed = true;
-let motionLowSince = 0;
-let lastMotionHitTime = 0;
-const motionProbeId = (() => {
-  const key = "dome-flow-motion-probe-id";
-  let id = sessionStorage.getItem(key);
-  if (!id) {
-    id = Date.now() + "-" + Math.random().toString(36).slice(2);
-    sessionStorage.setItem(key, id);
-  }
-  return id;
-})();
-
-function handleMotion(e) {
-  const directAcc = e.acceleration;
-  const gravityAcc = e.accelerationIncludingGravity;
-  const directHasValues = directAcc && [directAcc.x, directAcc.y, directAcc.z].some(Number.isFinite);
-  const acc = directHasValues ? directAcc : gravityAcc;
-  if (!acc) return;
-  const now = Date.now();
-  const dt = (now - lastMotionTime) / 1000;
-  if (dt < 0.08) return;
-
-  const currentAcc = {
-    x: Number.isFinite(acc.x) ? acc.x : 0,
-    y: Number.isFinite(acc.y) ? acc.y : 0,
-    z: Number.isFinite(acc.z) ? acc.z : 0
-  };
-  if (!lastAcc) {
-    lastAcc = currentAcc;
-    lastMotionTime = now;
-    return;
-  }
-  const jerk = Math.hypot(
-    currentAcc.x - lastAcc.x,
-    currentAcc.y - lastAcc.y,
-    currentAcc.z - lastAcc.z
-  ) / Math.max(dt, 0.05);
-  lastAcc = currentAcc;
-  lastMotionTime = now;
-
-  const jerkVal = Math.min(50, Math.round(jerk * 10) / 10);
-  if ($("#shock-jerk")) $("#shock-jerk").value = jerkVal;
-  if ($("#jerk-val")) $("#jerk-val").textContent = `${jerkVal} m/s³`;
-  if ($("#live-jerk-readout")) $("#live-jerk-readout").innerHTML = `${jerkVal} <small>m/s³</small>`;
-
-  if (jerkVal <= 8) {
-    if (!motionLowSince) motionLowSince = now;
-    if (now - motionLowSince >= 900) motionHitArmed = true;
-  } else {
-    motionLowSince = 0;
-  }
-
-  if (jerkVal >= 16 && motionHitArmed) {
-    motionHitArmed = false;
-    if (now - lastMotionHitTime >= 3000) {
-      lastMotionHitTime = now;
-      triggerSimShock("motion");
-    } else {
-      toast("Wait 3 seconds between phone shock hits");
+    if ($("#pothole-role-status-badge")) {
+      $("#pothole-role-status-badge").textContent = "Role: Unauthorized";
+      $("#pothole-role-status-badge").className = "status-tag alert";
+    }
+    if ($("#pothole-role-message")) {
+      $("#pothole-role-message").textContent = `Locked: ${err.message || "Enter PWD_TOKEN or POLICE_TOKEN"}`;
+      $("#pothole-role-message").style.color = "#ef4444";
+    }
+    const tbody = $("#pothole-tickets-tbody");
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="7" style="padding:14px; text-align:center; color:#ef4444;">
+        🔒 Access Restricted: ${esc(err.message || "Valid role token required")}. Enter PWD_TOKEN or POLICE_TOKEN.
+      </td></tr>`;
     }
   }
 }
 
-function bindMotion() {
-  if (isMotionActive) {
-    window.removeEventListener("devicemotion", handleMotion);
-    isMotionActive = false;
-    if ($("#btn-motion-sensor")) $("#btn-motion-sensor").innerHTML = "📱 Enable Live Phone Accelerometer";
-    toast("Motion sensor disabled");
-  } else {
-    lastAcc = null;
-    lastMotionTime = Date.now();
-    motionHitArmed = true;
-    motionLowSince = 0;
-    window.addEventListener("devicemotion", handleMotion);
-    isMotionActive = true;
-    if ($("#btn-motion-sensor")) $("#btn-motion-sensor").innerHTML = "📱 Motion Sensor Active (Shake to Shock)";
-    toast("📱 Phone Accelerometer Active — Shake device to register shock");
-  }
-}
-
-function toggleMotionSensor() {
-  if (!window.DeviceMotionEvent) {
-    toast("📱 DeviceMotionEvent not supported on this browser. Use Simulate (+1 Hit) button.");
+function renderPotholeTickets(tickets) {
+  const tbody = $("#pothole-tickets-tbody");
+  if (!tbody) return;
+  if (!tickets.length) {
+    tbody.innerHTML = `<tr><td colspan="7" style="padding:14px; text-align:center; color:#94a3b8;">
+      No active pothole tickets. Ingest partner events or run fleet simulator below.
+    </td></tr>`;
     return;
   }
-  if (typeof DeviceMotionEvent.requestPermission === "function") {
-    DeviceMotionEvent.requestPermission()
-      .then(res => {
-        if (res === "granted") bindMotion();
-        else toast("Device motion permission denied");
-      })
-      .catch(() => toast("Motion sensor permission error"));
-  } else {
-    bindMotion();
+
+  tbody.innerHTML = tickets.map(t => {
+    const km = (t.chainage_mid_m / 1000).toFixed(1);
+    let sevBadge = `<span style="background:rgba(234, 179, 8, 0.2); color:#eab308; padding:2px 6px; border-radius:4px; font-weight:700;">LOW</span>`;
+    if (t.severity === "HIGH") sevBadge = `<span style="background:rgba(239, 68, 68, 0.2); color:#ef4444; padding:2px 6px; border-radius:4px; font-weight:700;">HIGH</span>`;
+    else if (t.severity === "MED") sevBadge = `<span style="background:rgba(245, 158, 11, 0.2); color:#f59e0b; padding:2px 6px; border-radius:4px; font-weight:700;">MED</span>`;
+
+    let statusBadge = `<span style="color:#ef4444; font-weight:700;">OPEN</span>`;
+    if (t.status === "ACKNOWLEDGED") statusBadge = `<span style="color:#f59e0b; font-weight:700;">ACKNOWLEDGED</span>`;
+    else if (t.status === "REPAIR_CLAIMED") statusBadge = `<span style="color:#38bdf8; font-weight:700;">REPAIR CLAIMED (${(t.smooth_passes || []).length}/3)</span>`;
+    else if (t.status === "VERIFIED_REPAIRED") statusBadge = `<span style="color:#10b981; font-weight:700;">✓ VERIFIED REPAIRED</span>`;
+
+    let actionBtn = "—";
+    if (t.status === "OPEN") {
+      actionBtn = `<button class="secondary-btn" style="padding:2px 6px; font-size:10px;" onclick="acknowledgeTicket('${esc(t.id)}')">Acknowledge</button>`;
+    } else if (t.status === "ACKNOWLEDGED") {
+      actionBtn = `<button class="primary-btn" style="padding:2px 6px; font-size:10px;" onclick="claimRepair('${esc(t.id)}')">Claim Repair</button>`;
+    } else if (t.status === "REPAIR_CLAIMED") {
+      actionBtn = `<small style="color:#94a3b8;">Awaiting ${(3 - (t.smooth_passes || []).length)} smooth pass</small>`;
+    }
+
+    return `
+      <tr style="border-bottom:1px solid #1e293b;">
+        <td style="padding:6px; font-weight:700; color:#38bdf8;">${esc(t.id)}</td>
+        <td style="padding:6px;">${km} km</td>
+        <td style="padding:6px;">${sevBadge}</td>
+        <td style="padding:6px;">${t.confidence}</td>
+        <td style="padding:6px;">${t.distinct_source_groups}</td>
+        <td style="padding:6px;">${statusBadge}</td>
+        <td style="padding:6px;">${actionBtn}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function renderPartnerStats(partners) {
+  if (!$("#pothole-stats-ingest") || !partners.length) return;
+  const totalAcc = partners.reduce((acc, p) => acc + (p.accepted_events || 0), 0);
+  const totalRej = partners.reduce((acc, p) => acc + (p.rejected_events || 0), 0);
+  $("#pothole-stats-ingest").textContent = `Accepted: ${totalAcc} · Rejected: ${totalRej}`;
+}
+
+window.acknowledgeTicket = async function(ticketId) {
+  const token = $("#pothole-role-token")?.value || currentRoleToken;
+  try {
+    const res = await api(`/api/pwd/tickets/${encodeURIComponent(ticketId)}/acknowledge`, {
+      method: "POST",
+      headers: { "X-Role-Token": token }
+    });
+    if (res.ok) {
+      toast(`Ticket ${ticketId} acknowledged by PWD.`);
+      await fetchPotholesDashboard();
+    }
+  } catch (e) {
+    toast(`Failed to acknowledge ticket: ${e.message}`);
+  }
+};
+
+window.claimRepair = async function(ticketId) {
+  const token = $("#pothole-role-token")?.value || currentRoleToken;
+  try {
+    const res = await api(`/api/pwd/tickets/${encodeURIComponent(ticketId)}/claim_repair`, {
+      method: "POST",
+      headers: { "X-Role-Token": token }
+    });
+    if (res.ok) {
+      toast(`Ticket ${ticketId} marked REPAIR_CLAIMED. Awaiting 3 smooth fleet passes.`);
+      await fetchPotholesDashboard();
+    }
+  } catch (e) {
+    toast(`Failed to claim repair: ${e.message}`);
+  }
+};
+
+async function renderPotholeMapMarkers() {
+  const maps = [corridorLeafletMap, corridorDedicatedMap].filter(Boolean);
+  if (!maps.length || typeof L === "undefined") return;
+
+  const token = $("#pothole-role-token")?.value || currentRoleToken;
+  try {
+    const res = await api(`/api/potholes/map_markers?token=${encodeURIComponent(token)}`);
+    if (!res.ok || !res.markers) return;
+
+    potholeMapMarkers.forEach(m => m.remove());
+    potholeMapMarkers = [];
+
+    res.markers.forEach(item => {
+      const lat = item.lat, lon = item.lon;
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+      let color = "#ef4444";
+      let iconHtml = "🕳️";
+      if (item.type === "SPEED_BREAKER") {
+        color = "#8b5cf6";
+        iconHtml = "🛑";
+      } else if (item.status === "VERIFIED_REPAIRED") {
+        color = "#10b981";
+        iconHtml = "✓";
+      } else if (item.severity === "MED") {
+        color = "#f59e0b";
+      } else if (item.severity === "LOW") {
+        color = "#eab308";
+      }
+
+      const customIcon = L.divIcon({
+        className: "pothole-leaflet-marker",
+        html: `<div style="background:${color}; color:#fff; width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; border:2px solid #fff; box-shadow:0 0 8px ${color};">${iconHtml}</div>`,
+        iconSize: [22, 22],
+        iconAnchor: [11, 11]
+      });
+
+      const popupHtml = `
+        <div class="leaflet-junction-popup">
+          <div class="popup-tag" style="background:${color}; color:#fff;">
+            ${esc(item.type)} · ${esc(item.status)}
+          </div>
+          <h4 style="margin:4px 0;">${esc(item.id)}</h4>
+          <div class="popup-meta">
+            <span>Chainage: <b>${(item.chainage_m / 1000).toFixed(1)} km</b></span> &nbsp;·&nbsp;
+            <span>Severity: <b>${esc(item.severity)}</b></span>
+          </div>
+          <div class="popup-queues" style="margin-top:6px;">
+            Evidence Hits: <b>${item.evidence_count}</b> &nbsp;|&nbsp;
+            Source Groups: <b>${item.distinct_source_groups || 1}</b>
+          </div>
+        </div>
+      `;
+
+      maps.forEach(map => {
+        const marker = L.marker([lat, lon], { icon: customIcon }).addTo(map);
+        marker.bindPopup(popupHtml);
+        potholeMapMarkers.push(marker);
+      });
+    });
+  } catch (err) {}
+}
+
+async function runFleetSimAction(action) {
+  try {
+    const res = await api("/api/dev/fleet_simulation", {
+      method: "POST",
+      body: JSON.stringify({ action })
+    });
+    if (res.ok) {
+      if (action === "self_check" && res.tests) {
+        const c = $("#test-suite-console");
+        if (c) {
+          c.style.display = "block";
+          c.innerHTML = `<b>FLEET TELEMATICS 8-TEST VERIFICATION SUITE:</b>\n` +
+            res.tests.map(t => `[${t.pass ? 'PASS' : 'FAIL'}] ${t.name}: ${t.actual}`).join("\n");
+        }
+        toast(res.all_passed ? "✓ All 8 fleet simulator tests PASSED!" : "Some tests failed");
+      } else {
+        toast(`Action '${action}' executed successfully.`);
+      }
+      await fetchPotholesDashboard();
+    }
+  } catch (e) {
+    toast(`Fleet simulation error: ${e.message}`);
   }
 }
 
 function initModuleB() {
-  if ($("#shock-jerk")) {
-    $("#shock-jerk").addEventListener("input", e => {
-      const val = e.target.value;
-      if ($("#jerk-val")) $("#jerk-val").textContent = `${val} m/s³`;
-      if ($("#live-jerk-readout")) $("#live-jerk-readout").innerHTML = `${val} <small>m/s³</small>`;
-    });
+  if ($("#btn-auth-pwd")) {
+    $("#btn-auth-pwd").onclick = () => {
+      if ($("#pothole-role-token")) $("#pothole-role-token").value = "demo-pwd-token";
+      currentRoleToken = "demo-pwd-token";
+      fetchPotholesDashboard();
+      toast("Authenticated as PWD role");
+    };
   }
 
-  if ($("#shock-speed")) {
-    $("#shock-speed").addEventListener("input", e => {
-      const val = e.target.value;
-      if ($("#speed-val")) $("#speed-val").textContent = `${val} km/h`;
-      if ($("#live-speed-readout")) $("#live-speed-readout").innerHTML = `${val} <small>km/h</small>`;
-    });
+  if ($("#btn-auth-police")) {
+    $("#btn-auth-police").onclick = () => {
+      if ($("#pothole-role-token")) $("#pothole-role-token").value = "demo-police-token";
+      currentRoleToken = "demo-police-token";
+      fetchPotholesDashboard();
+      toast("Authenticated as Police role");
+    };
   }
 
-  if ($("#btn-sim-shock")) $("#btn-sim-shock").onclick = triggerSimShock;
-  if ($("#btn-motion-sensor")) $("#btn-motion-sensor").onclick = toggleMotionSensor;
+  if ($("#btn-refresh-potholes")) {
+    $("#btn-refresh-potholes").onclick = () => {
+      fetchPotholesDashboard();
+      toast("Pothole tickets refreshed.");
+    };
+  }
+
+  if ($("#toggle-partner-view")) {
+    $("#toggle-partner-view").onchange = async (e) => {
+      const isPartner = e.target.checked;
+      const box = $("#partner-view-box");
+      if (isPartner) {
+        if (box) box.style.display = "block";
+        try {
+          const res = await fetch("/api/partner/alerts?chainage_m=10000", {
+            headers: { "X-Partner-Key": "aura_pk_quickcab_2026" }
+          });
+          const data = await res.json();
+          const alertsEl = $("#partner-alerts-content");
+          if (alertsEl && data.alerts) {
+            alertsEl.innerHTML = `
+              <b>AURA Live Hazard Alerts Ahead (within 2 km of Km 10):</b><br>
+              ${data.alerts.length ? data.alerts.map(a => `• Upcoming <b>${a.hazard_band}</b> hazard at +${a.relative_dist_m}m (${a.type})`).join("<br>") : "No severe hazards within next 2 km."}
+              <br><br><small style="color:#ef4444;">Attempting to fetch /api/potholes/dashboard with partner key...</small>
+            `;
+            const forbiddenRes = await fetch("/api/potholes/dashboard", {
+              headers: { "X-Partner-Key": "aura_pk_quickcab_2026" }
+            });
+            alertsEl.innerHTML += `<br><span style="color:#ef4444; font-weight:700;">HTTP ${forbiddenRes.status} Forbidden: Partners cannot read pothole records.</span>`;
+          }
+        } catch (err) {
+          console.error(err);
+        }
+      } else {
+        if (box) box.style.display = "none";
+      }
+    };
+  }
+
+  document.querySelectorAll(".sim-btn[data-action]").forEach(btn => {
+    btn.onclick = () => runFleetSimAction(btn.dataset.action);
+  });
+
+  if ($("#btn-run-all-tests")) {
+    $("#btn-run-all-tests").onclick = () => runFleetSimAction("self_check");
+  }
+
+  fetchPotholesDashboard();
 }
 
 // ==========================================

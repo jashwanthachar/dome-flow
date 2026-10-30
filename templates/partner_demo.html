@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QuickCabs Driver · Partner Fleet App Demo</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    body {
+      background: #0b1120;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .partner-app-header {
+      background: #1e293b;
+      padding: 14px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #334155;
+    }
+    .partner-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .partner-logo {
+      background: #3b82f6;
+      color: #fff;
+      font-weight: 900;
+      font-size: 18px;
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .driver-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      color: #10b981;
+      font-weight: 600;
+    }
+    .rideapp-main {
+      flex: 1;
+      max-width: 720px;
+      margin: 20px auto;
+      width: 92%;
+    }
+    .ride-card {
+      background: #1e293b;
+      border-radius: 16px;
+      padding: 24px;
+      border: 1px solid #334155;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+      margin-bottom: 20px;
+    }
+    .route-display {
+      background: #0f172a;
+      border-radius: 12px;
+      padding: 16px;
+      margin: 16px 0;
+      border: 1px solid #1e293b;
+    }
+    .route-point {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 8px 0;
+      font-size: 14px;
+    }
+    .meter-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .meter-box {
+      background: #0f172a;
+      padding: 12px;
+      border-radius: 8px;
+      text-align: center;
+      border: 1px solid #1e293b;
+    }
+    .meter-box small {
+      display: block;
+      color: #94a3b8;
+      font-size: 10px;
+      margin-bottom: 4px;
+    }
+    .meter-box strong {
+      font-size: 18px;
+      color: #38bdf8;
+    }
+
+    /* Embedded AURA SDK Debug Strip at bottom (collapsed / subtle) */
+    .sdk-proof-strip {
+      background: rgba(15, 23, 42, 0.95);
+      border-top: 1px solid #38bdf8;
+      padding: 10px 20px;
+      font-size: 11px;
+      color: #94a3b8;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .sdk-badge {
+      background: #0369a1;
+      color: #e0f2fe;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 700;
+    }
+    .sdk-btn {
+      background: #1e293b;
+      color: #38bdf8;
+      border: 1px solid #38bdf8;
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .sdk-btn:hover {
+      background: #0284c7;
+      color: #fff;
+    }
+    .sdk-event-log {
+      max-height: 120px;
+      overflow-y: auto;
+      background: #020617;
+      border: 1px solid #1e293b;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 10px;
+      color: #a7f3d0;
+      margin-top: 8px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- PARTNER APP NATIVE UI (Completely standard ride-hailing screen) -->
+  <header class="partner-app-header">
+    <div class="partner-brand">
+      <div class="partner-logo">Q</div>
+      <div>
+        <b>QuickCabs Driver</b>
+        <small style="display:block; color:#94a3b8; font-size:11px;">Fleet Partner #KA-QC-084 · Toyota Etios</small>
+      </div>
+    </div>
+    <div class="driver-status">
+      <span style="width:8px; height:8px; border-radius:50%; background:#10b981;"></span>
+      <span>ONLINE · WAITING FOR TRIPS</span>
+    </div>
+  </header>
+
+  <main class="rideapp-main">
+    <div class="ride-card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <span style="color:#38bdf8; font-size:12px; font-weight:700;">CURRENT RUNTIME CORRIDOR</span>
+          <h2 style="margin:4px 0 0 0; font-size:20px;">NH-206: Tumakuru – Gubbi Route</h2>
+        </div>
+        <span style="background:#0284c7; color:#fff; font-size:11px; padding:4px 10px; border-radius:12px; font-weight:600;">Trip Ready</span>
+      </div>
+
+      <div class="route-display">
+        <div class="route-point">
+          <span style="color:#10b981;">●</span>
+          <div><b>Tumakuru Batawadi Terminal</b> (Chainage 0.0 km)</div>
+        </div>
+        <div style="margin-left: 5px; border-left: 2px dashed #475569; height: 18px;"></div>
+        <div class="route-point">
+          <span style="color:#f59e0b;">●</span>
+          <div><b>Gubbi Town Central Stand</b> (Chainage 19.5 km)</div>
+        </div>
+      </div>
+
+      <div class="meter-grid">
+        <div class="meter-box">
+          <small>GPS TELEMETRY SPEED</small>
+          <strong id="disp-speed">48 km/h</strong>
+        </div>
+        <div class="meter-box">
+          <small>DRIVER SAFETY RATING</small>
+          <strong style="color:#10b981;">4.9 ★</strong>
+        </div>
+        <div class="meter-box">
+          <small>ESTIMATED TRIP FARE</small>
+          <strong>₹ 450</strong>
+        </div>
+      </div>
+
+      <div style="margin-top:20px; display:flex; gap:12px;">
+        <button style="flex:1; background:#22c55e; color:#0f172a; font-weight:700; border:none; padding:12px; border-radius:8px; cursor:pointer;" onclick="alert('Partner Ride App: Next booking accepted!')">Accept Next Ride</button>
+        <button style="background:#334155; color:#cbd5e1; border:none; padding:12px 18px; border-radius:8px; cursor:pointer;" onclick="location.href='/'">← Back to DOME Dashboard</button>
+      </div>
+    </div>
+
+    <!-- Partner Alerts Ahead Card (Read-only query allowed by AURA partner key) -->
+    <div class="ride-card" style="background:#0f172a; border-color:#1e293b;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <b>⚠️ Live Route Road Hazards Ahead (within 2 km)</b>
+        <button class="sdk-btn" onclick="queryAheadHazards()">Refresh Alerts</button>
+      </div>
+      <p style="font-size:11px; color:#94a3b8; margin:6px 0 12px 0;">
+        Powered by AURA Fleet Alerts API: Partner key receives severity bands only (no coordinates, no ticket data, no other fleet data).
+      </p>
+      <div id="alerts-ahead-list" style="font-size:12px; color:#e2e8f0;">
+        <i>Click 'Refresh Alerts' or drive to query upcoming corridor hazard bands.</i>
+      </div>
+    </div>
+  </main>
+
+  <!-- COLLAPSED AURA SDK DEBUG STRIP (PROVES ZERO UI CHANGE) -->
+  <footer class="sdk-proof-strip">
+    <div style="display:flex; align-items:center; gap:8px;">
+      <span class="sdk-badge">AURA PARTNER SDK v1.0</span>
+      <span>Background Telematics Active (Zero UI change to QuickCabs)</span>
+      <span>·</span>
+      <span>Events Sent: <b id="sdk-events-count" style="color:#38bdf8;">0</b></span>
+      <span>·</span>
+      <span>Pseudonym: <code id="sdk-pseudo-id" style="color:#94a3b8;">veh_...</code></span>
+    </div>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <button class="sdk-btn" onclick="triggerSimulatedSpike()">⚡ Test Shock Spike</button>
+      <button class="sdk-btn" onclick="AURA.resetPseudonym(); updateSdkStatus();">Reset Pseudonym</button>
+      <button class="sdk-btn" onclick="toggleSdkLog()">Toggle Ingest Log</button>
+    </div>
+    <div id="sdk-log-box" class="sdk-event-log" style="width:100%;"></div>
+  </footer>
+
+  <!-- LOAD THE AURA PARTNER SDK VIA A SINGLE SCRIPT TAG -->
+  <script src="/static/aura-sdk.js"></script>
+
+  <!-- 5-LINE INTEGRATION PROOF -->
+  <script>
+    // 1. Initialize AURA with partner credentials and vehicle profile
+    AURA.init({
+      partnerKey: "aura_pk_quickcab_2026",
+      vehicleClass: "car",
+      onEvent: function(evt) {
+        logSdkEvent(evt);
+        updateSdkStatus();
+      }
+    });
+
+    // 2. Start telemetry capture in background (DeviceMotion + Geolocation)
+    AURA.start();
+
+    // UI Helper logic for the demo screen
+    function updateSdkStatus() {
+      document.getElementById("sdk-events-count").textContent = AURA.getEventsSentCount();
+      document.getElementById("sdk-pseudo-id").textContent = AURA.getPseudonym();
+    }
+    updateSdkStatus();
+
+    function logSdkEvent(evt) {
+      const box = document.getElementById("sdk-log-box");
+      const line = document.createElement("div");
+      line.textContent = `[${new Date().toLocaleTimeString()}] Sent derived event: accel_z=${evt.payload?.accel_z_peak} m/s², jerk=${evt.payload?.jerk_peak} m/s³, class=${evt.payload?.vehicle_class} -> HTTP ${evt.httpStatus || 200}`;
+      box.appendChild(line);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function toggleSdkLog() {
+      const box = document.getElementById("sdk-log-box");
+      box.style.display = box.style.display === "block" ? "none" : "block";
+    }
+
+    async function triggerSimulatedSpike() {
+      // Simulate driving near NH-206 Gubbi stretch (Chainage ~14,200m)
+      AURA.setSimulatedGps(13.3142, 76.9620, 48.0);
+      const res = await AURA.simulateSpike({
+        accel_z_peak: 21.8,
+        jerk_peak: 24.2,
+        vehicle_class: "car"
+      });
+      if (res && res.ok) {
+        alert("AURA SDK: Derived event transmitted to /api/sdk/ingest (raw lat/lon discarded by server, snapped to NH-206 chainage).");
+      }
+    }
+
+    async function queryAheadHazards() {
+      const res = await AURA.queryAlertsAhead(13000); // query 2km ahead from km 13
+      const listEl = document.getElementById("alerts-ahead-list");
+      if (res && res.ok && res.alerts && res.alerts.length) {
+        listEl.innerHTML = res.alerts.map(a => 
+          `<div style="padding:6px 0; border-bottom:1px solid #1e293b;">
+            ⚠️ <b>${a.hazard_band} Severity Hazard</b> ahead at +${a.relative_dist_m}m (${a.type})
+          </div>`
+        ).join("");
+      } else {
+        listEl.innerHTML = `<span style="color:#10b981;">✓ No severe road hazards detected in the next 2 km of corridor.</span>`;
+      }
+    }
+  </script>
+</body>
+</html>
