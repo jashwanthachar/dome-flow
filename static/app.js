@@ -662,7 +662,7 @@ function initModuleA() {
 // 4. MODULE B: CROWD-TELEMATICS PROBE WIRING
 // ==========================================
 
-async function triggerSimShock() {
+async function triggerSimShock(source = "simulator") {
   const corridor = $("#shock-corridor")?.value || (currentSummary?.active_scenario || "nh206");
   const z_jerk = parseFloat($("#shock-jerk")?.value || 24.5);
   const speed_kmh = parseFloat($("#shock-speed")?.value || 48);
@@ -670,7 +670,13 @@ async function triggerSimShock() {
   try {
     const res = await api("/api/telematics/shock", {
       method: "POST",
-      body: JSON.stringify({ corridor, z_jerk, speed_kmh })
+      body: JSON.stringify({
+        corridor,
+        z_jerk,
+        speed_kmh,
+        source,
+        probe_id: source === "motion" ? motionProbeId : undefined
+      })
     });
 
     if (res.status === "filtered_noise") {
@@ -695,6 +701,18 @@ async function triggerSimShock() {
 let isMotionActive = false;
 let lastAcc = { x: 0, y: 0, z: 9.8 };
 let lastMotionTime = Date.now();
+let motionHitArmed = true;
+let motionLowSince = 0;
+let lastMotionHitTime = 0;
+const motionProbeId = (() => {
+  const key = "dome-flow-motion-probe-id";
+  let id = sessionStorage.getItem(key);
+  if (!id) {
+    id = Date.now() + "-" + Math.random().toString(36).slice(2);
+    sessionStorage.setItem(key, id);
+  }
+  return id;
+})();
 
 function handleMotion(e) {
   const acc = e.accelerationIncludingGravity || e.acceleration;
@@ -713,8 +731,17 @@ function handleMotion(e) {
   if ($("#jerk-val")) $("#jerk-val").textContent = `${jerkVal} m/s³`;
   if ($("#live-jerk-readout")) $("#live-jerk-readout").innerHTML = `${jerkVal} <small>m/s³</small>`;
 
-  if (jerkVal >= 16) {
-    triggerSimShock();
+  if (jerkVal <= 8) {
+    if (!motionLowSince) motionLowSince = now;
+    if (now - motionLowSince >= 900) motionHitArmed = true;
+  } else {
+    motionLowSince = 0;
+  }
+
+  if (jerkVal >= 16 && motionHitArmed && now - lastMotionHitTime >= 3000) {
+    motionHitArmed = false;
+    lastMotionHitTime = now;
+    triggerSimShock("motion");
   }
 }
 
@@ -819,9 +846,27 @@ function drawChart() {
     .join("");
 }
 
+function updateHeaderClock() {
+  const now = new Date();
+  const dateEl = $("#header-date");
+  const timeEl = $("#header-time");
+  if (dateEl) {
+    dateEl.textContent = new Intl.DateTimeFormat("en-IN", {
+      timeZone: "Asia/Kolkata", weekday: "short", day: "2-digit", month: "short"
+    }).format(now).toUpperCase();
+  }
+  if (timeEl) {
+    timeEl.textContent = new Intl.DateTimeFormat("en-IN", {
+      timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true
+    }).format(now);
+  }
+}
+
 // Bootstrap all modules
 initTopbarAndModals();
 initModuleA();
 initModuleB();
 load();
 drawChart();
+updateHeaderClock();
+setInterval(updateHeaderClock, 1000);

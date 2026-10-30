@@ -1,10 +1,19 @@
 from flask import Flask, render_template, jsonify, request
 from datetime import datetime
 from threading import Lock
+from time import monotonic
+from zoneinfo import ZoneInfo
 import random
 
 app = Flask(__name__)
 lock = Lock()
+INDIA_TZ = ZoneInfo("Asia/Kolkata")
+MOTION_HIT_COOLDOWN_SECONDS = 3.0
+motion_probe_last_hit = {}
+
+
+def india_now():
+    return datetime.now(INDIA_TZ)
 
 # Global Network & Scenario State
 active_scenario = "nh206"  # Default: 'nh206' (NH-206: CIT Gubbi – Tumakuru Corridor), toggleable to 'bengaluru'
@@ -288,7 +297,7 @@ def get_incidents():
             ]
     return jsonify({
         "demo": True,
-        "updated": datetime.now().strftime("%H:%M"),
+        "updated": india_now().strftime("%H:%M:%S"),
         "incidents": data,
         "active_scenario": active_scenario
     })
@@ -402,7 +411,7 @@ def trigger_preempt():
             "x": 48,
             "y": 32,
             "severity": "High",
-            "reported": datetime.now().strftime("%I:%M %p"),
+            "reported": india_now().strftime("%I:%M:%S %p"),
             "status": "In progress",
             "delay": 0,
             "detail": f"Emergency preemption corridor engaged. ETA: {round(eta_sec, 1)}s ({round(ambulance_dist_m)}m @ {round(ambulance_speed_kmh)} km/h). Siren confidence: {int(siren_confidence * 100)}%.",
@@ -453,6 +462,8 @@ def telematics_shock():
     """
     payload = request.get_json(silent=True) or {}
     corridor = payload.get("corridor") or active_scenario
+    source = payload.get("source", "simulator")
+    probe_id = str(payload.get("probe_id", ""))
     z_jerk = float(payload.get("z_jerk", 0.0))
     speed_kmh = float(payload.get("speed_kmh", 0.0))
     lat = float(payload.get("lat", 13.3120))
@@ -468,6 +479,17 @@ def telematics_shock():
         }), 200
 
     with lock:
+        if source == "motion":
+            probe_key = f"{corridor}:{probe_id or request.remote_addr or 'unknown'}"
+            now = monotonic()
+            previous_hit = motion_probe_last_hit.get(probe_key, 0.0)
+            if now - previous_hit < MOTION_HIT_COOLDOWN_SECONDS:
+                return jsonify({
+                    "status": "motion_cooldown",
+                    "retry_after_seconds": round(MOTION_HIT_COOLDOWN_SECONDS - (now - previous_hit), 1)
+                }), 200
+            motion_probe_last_hit[probe_key] = now
+
         telematics_clusters[corridor] = telematics_clusters.get(corridor, 0) + 1
         count = telematics_clusters[corridor]
 
@@ -494,7 +516,7 @@ def telematics_shock():
             "x": 52,
             "y": 48,
             "severity": "High",
-            "reported": datetime.now().strftime("%I:%M %p"),
+            "reported": india_now().strftime("%I:%M:%S %p"),
             "status": "Reported",
             "delay": 14,
             "detail": f"Triangulated inertial probe cluster: 3 independent probe hits registered severe vertical shock (z-jerk: {round(z_jerk, 1)} m/s³ @ {round(speed_kmh, 1)} km/h). PWD work order automatically generated.",
