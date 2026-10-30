@@ -436,13 +436,13 @@ function renderSummary(data) {
   const isNH206 = data.active_scenario === "nh206";
   if ($("#corridor-breadcrumb")) {
     $("#corridor-breadcrumb").textContent = isNH206
-      ? "SMART MOBILITY / NH-206: CIT GUBBI – TUMAKURU CORRIDOR (S2)"
-      : "CITY MOBILITY / BENGALURU METROPOLITAN CORRIDOR";
+      ? "SMART MOBILITY / NH-206: TUMAKURU - GUBBI - NITTUR CORRIDOR (28.5 KM)"
+      : "CITY MOBILITY / NH-206 CORRIDOR";
   }
   if ($("#svg-map-caption")) {
     $("#svg-map-caption").textContent = isNH206
-      ? "NH-206 CORRIDOR · 4-JUNCTION DIGITAL TWIN"
-      : "BENGALURU ROAD NETWORK · ILLUSTRATIVE SCHEMATIC";
+      ? "NH-206 CORRIDOR (TUMAKURU - GUBBI - NITTUR) - REAL OSM DATA (ODbL)"
+      : "NH-206 CORRIDOR - OPENSTREETMAP DATA";
   }
 
   // 2. S2 Live Impact Strip
@@ -2554,7 +2554,7 @@ function updateCorridorJunctionMarkers(junctionsList) {
     const lat = Number(j.lat), lon = Number(j.lon || j.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
 
-    const isReal = j.signalised === "true";
+    const isReal = j.signalised === "true" || j.signalised === true;
     const markerClass = isReal ? "corridor-marker-real" : "corridor-marker-proposed";
 
     const customIcon = L.divIcon({
