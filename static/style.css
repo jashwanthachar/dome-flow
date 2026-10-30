@@ -710,6 +710,67 @@ button {
   font-size: 11px;
 }
 
+.harm-readout {
+  display: grid;
+  gap: 5px;
+  margin-top: 9px;
+  padding: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 9px;
+  background: rgba(2, 6, 23, 0.24);
+  color: #94a3b8;
+  font-size: 8px;
+}
+.harm-readout > div:not(.harm-balance) { display: flex; justify-content: space-between; gap: 5px; }
+.harm-readout b { color: #e2e8f0; font-family: 'JetBrains Mono', monospace; }
+.harm-balance-label { color: #cbd5e1; }
+.harm-balance { height: 5px; border-radius: 9px; background: rgba(248, 113, 113, 0.55); overflow: hidden; }
+.harm-balance i { display: block; height: 100%; background: #34d399; border-radius: inherit; }
+.harm-readout small { line-height: 1.4; }
+
+.controller-safety-strip, .controller-recommendation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0;
+  padding: 12px 15px;
+  border: 1px solid rgba(125, 164, 205, 0.22);
+  border-radius: 12px;
+  color: #cbd5e1;
+  font-size: 11px;
+}
+.controller-safety-strip button, .controller-recommendation button {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: rgba(30, 58, 90, 0.75);
+  color: #e2e8f0;
+  cursor: pointer;
+}
+.failsafe-badge { color: #34d399; }
+.failsafe-badge.active { color: #fca5a5; }
+.simulation-banner {
+  margin: 8px 0 14px;
+  padding: 9px;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.18);
+  color: #fcd34d;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.controller-recommendation[hidden] { display: none; }
+.controller-recommendation { border-color: rgba(56, 189, 248, 0.45); }
+.controller-recommendation > div:first-child { display: grid; gap: 5px; }
+.controller-recommendation small, .junction-interlock { color: #94a3b8; font-size: 9px; }
+.controller-recommendation-actions { display: flex; gap: 7px; }
+.controller-mode-control { display: flex; align-items: center; gap: 6px; margin: 6px 0; color: #94a3b8; font-size: 9px; }
+.controller-mode-control select { max-width: 120px; border: 1px solid rgba(148,163,184,.3); border-radius: 6px; padding: 4px; background: #14243a; color: #e2e8f0; }
+.controller-mode-badge { display: inline-block; margin: 0 0 2px; padding: 3px 7px; border-radius: 10px; background: rgba(56, 189, 248, 0.12); color: #7dd3fc; font-size: 8px; font-weight: 800; letter-spacing: .06em; }
+
 /* Map & Panels */
 .content-grid {
   display: grid;

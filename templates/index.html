@@ -187,20 +187,37 @@
     <section class="view" id="s2-command" data-view-panel="s2-command">
       <div class="view-intro">
         <div>
-          <div class="section-kicker">S2 EDGE AI &amp; INERTIAL PREEMPTION ENGINE</div>
+          <div class="section-kicker">S2 EDGE AI &amp; SIGNAL ADVISORY / SIMULATOR</div>
           <h2>S2 Command Center</h2>
           <p class="muted">A junction setup needs a microphone and a small edge device. A signed ambulance token and confirmed approaching siren must agree; the audit log records each decision.</p>
         </div>
-        <span class="operator-badge pulse-badge">🚨 S2 Edge Core Active</span>
+        <span class="operator-badge pulse-badge">Decision &amp; Controller Adapter</span>
       </div>
+
+      <div class="controller-safety-strip glass">
+        <span class="status-tag" id="controller-mode-status">ADVISORY · decision only</span>
+        <strong class="failsafe-badge" id="controller-failsafe-badge">FAIL-SAFE ACTIVE</strong>
+        <span id="controller-failsafe-reason">Waiting for decision and input heartbeats.</span>
+        <span id="controller-interlock-status">Waiting for controller status.</span>
+        <button type="button" id="controller-manual-override">Manual override · fixed-time plan</button>
+        <button type="button" id="controller-self-check">Run controller safety self-check</button>
+      </div>
+      <div class="controller-recommendation glass" id="controller-recommendation" hidden>
+        <div><b id="controller-recommendation-title">Recommendation</b><small id="controller-recommendation-details"></small></div>
+        <div class="controller-recommendation-actions">
+          <button type="button" data-recommendation-action="confirm">Confirm advisory</button>
+          <button type="button" data-recommendation-action="dismiss">Dismiss</button>
+        </div>
+      </div>
+      <div class="simulation-banner" id="controller-simulation-banner">SIMULATION, NOT CONNECTED TO REAL SIGNALS</div>
 
       <div class="s2-command-grid">
         <!-- Left Column: Module A -->
         <div class="panel glass s2-module-card">
           <div class="panel-heading">
             <div>
-              <div class="section-kicker">MODULE A — LOW-COST DUAL-KEY PREEMPTION</div>
-              <h3>Emergency Green Corridor &amp; Queue-Discharge Timing</h3>
+              <div class="section-kicker">MODULE A — LOW-COST DUAL-KEY ADVISORY</div>
+              <h3>Emergency Signal Advisory &amp; Queue-Discharge Timing</h3>
             </div>
             <span class="status-tag in-progress" id="siren-status-badge">Acoustic Standby</span>
           </div>
@@ -280,16 +297,20 @@
                 <span class="direction-gate-result">Gate <b id="direction-gate">Denied · Trend uncertain</b></span>
               </div>
             <div class="dual-key-tools">
-              <div><b>Dual-key vehicle gate</b> · <a href="/ambulance" target="_blank" rel="noopener">Open 108 Driver App</a></div>
+              <div><b>Dual-key authenticated gate</b> · <a href="/ambulance" target="_blank" rel="noopener">Open 108 Driver App</a></div>
               <label>Verified vehicle <select id="verified-vehicle"><option value="">No vehicle selected</option></select></label>
               <label>Admin token <input id="admin-token" type="password" autocomplete="off" placeholder="ADMIN_TOKEN"></label>
               <button type="button" id="vehicle-refresh">Refresh vehicles &amp; audit</button>
-              <p id="dual-key-status" role="status">A confirmed siren without a verified vehicle is WATCH only.</p>
+              <p id="dual-key-status" role="status">Both the ambulance and junction unit must have approved signing keys.</p>
               <div class="range-table-wrap"><table class="range-table"><thead><tr><th>Vehicle</th><th>Status</th><th>Last report</th><th>Admin</th></tr></thead><tbody id="vehicle-registry-body"></tbody></table></div>
+              <h4>Junction acoustic unit</h4>
+              <button type="button" id="junction-unit-enroll">Create / enroll unit for selected junction</button>
+              <p id="junction-unit-status" role="status">The private key stays in this browser's IndexedDB.</p>
+              <div class="range-table-wrap"><table class="range-table"><thead><tr><th>Unit</th><th>Junction</th><th>Status</th><th>Last signed event</th><th>Admin</th></tr></thead><tbody id="unit-registry-body"></tbody></table></div>
               <h4>Try to break it</h4>
-              <div class="siren-test-buttons"><button data-attack="recorded">Recorded siren, no token</button><button data-attack="replay">Replay old token</button><button data-attack="tamper">Tampered report</button><button data-attack="revoked">Revoked token</button><button data-attack="teleport">Teleport 5 km</button><button data-attack="valid">Valid token + siren</button><button id="attack-self-check">Run attack self-check</button></div>
+              <div class="siren-test-buttons"><button data-attack="recorded">Unsigned siren, no token</button><button data-attack="replay">Replay old vehicle token</button><button data-attack="tamper">Tampered vehicle report</button><button data-attack="revoked">Revoked vehicle</button><button data-attack="teleport">Teleport 5 km</button><button data-attack="unknown-unit">Unknown unit event</button><button data-attack="revoked-unit">Revoked unit event</button><button data-attack="replay-event">Replay acoustic event</button><button data-attack="wrong-junction">Wrong-junction unit</button><button data-attack="valid">Valid vehicle + signed siren</button><button id="attack-self-check">Run attack self-check</button></div>
               <div class="range-panel-heading"><b>Audit hash chain</b><strong id="audit-chain-status">Loading…</strong></div>
-              <div class="range-table-wrap"><table class="range-table"><thead><tr><th>Decision</th><th>Reason</th><th>Vehicle</th><th>Junction</th><th>Time</th></tr></thead><tbody id="audit-log-body"></tbody></table></div>
+              <div class="range-table-wrap"><table class="range-table"><thead><tr><th>Decision</th><th>Reason</th><th>Vehicle / unit</th><th>Junction</th><th>Time</th></tr></thead><tbody id="audit-log-body"></tbody></table></div>
             </div>
             </div>
             <small id="siren-test-playing">Open this page with ?dev=1 to show developer tools.</small>
@@ -343,9 +364,10 @@
             </div>
             <small id="queue-breakdown">Reaction 3.5s · start-up 2.0s · cars 24.0s · heavy vehicles 17.6s · two-wheelers 17.5s · auto-rickshaws 0.0s · 2 lanes</small>
             <button class="secondary-btn" id="queue-self-check" type="button">Run queue model self-check</button>
+            <button class="secondary-btn" id="harm-self-check" type="button">Run minimum-harm self-check</button>
           </div>
 
-          <button class="danger-action-btn" id="btn-trigger-preempt" title="Requires close-range confirmed siren detection">🚑 Green requires close-range siren confirmation</button>
+          <button class="danger-action-btn" id="btn-trigger-preempt" title="Simulator only in DEMO_AUTO; ADVISORY never changes a phase">🚑 Safety-gated signal request · simulator only</button>
         </div>
 
         <!-- Right Column: Module B -->

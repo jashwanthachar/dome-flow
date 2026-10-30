@@ -12,6 +12,7 @@ import hmac
 import json
 import os
 import re
+import secrets
 from collections import deque
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
@@ -49,7 +50,11 @@ AUTH_CONFIG = {
     "LONGITUDE_LIMIT_DEG": 180,  # ASSUMPTION: valid geographic longitude bound.
     "MAX_VEHICLE_ID_LENGTH": 80,  # ASSUMPTION: identifier length limit.
     "MIN_NONCE_LENGTH": 16,  # ASSUMPTION: minimum nonce entropy encoding length.
-    "MAX_NONCE_LENGTH": 128  # ASSUMPTION: nonce length limit.
+    "MAX_NONCE_LENGTH": 128,  # ASSUMPTION: nonce length limit.
+    "ACOUSTIC_MAX_AGE_S": 3,  # ASSUMPTION: maximum age of a signed acoustic confirmation.
+    "ACOUSTIC_POSITION_TIME_TOLERANCE_S": 3,  # ASSUMPTION: allowed time difference from the signed vehicle fix.
+    "ACOUSTIC_POSITION_TOLERANCE_M": 50,  # ASSUMPTION: position uncertainty allowed at event time.
+    "MAX_JUNCTION_UNITS": 100  # ASSUMPTION: in-memory demo registry capacity.
 }
 
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
@@ -62,6 +67,8 @@ JUNCTION_ARM_BEARINGS = {
 }
 
 vehicle_registry = {}
+junction_unit_registry = {}
+acoustic_event_registry = {}
 seen_nonces = {}
 audit_entries = []
 audit_head_hash = "0" * 64
@@ -141,6 +148,34 @@ def _canonical_report(payload):
         if not isinstance(payload[key], str) or payload[key] != canonical[key]:
             raise ValueError(f"{key} must use its canonical fixed-decimal string")
     return canonical
+
+
+def _canonical_unit_event(payload):
+    required = ("unit_id", "junction_id", "timestamp", "nonce", "label", "confidence",
+                "approach", "slope", "r_squared")
+    if any(key not in payload for key in required):
+        raise ValueError("Missing signed acoustic event fields")
+    unit_id, junction_id, nonce = payload["unit_id"], payload["junction_id"], payload["nonce"]
+    if not isinstance(unit_id, str) or len(unit_id) > AUTH_CONFIG["MAX_VEHICLE_ID_LENGTH"] or not re.fullmatch(r"[A-Za-z0-9_-]+", unit_id):
+        raise ValueError("Invalid unit_id")
+    if junction_id not in {item["id"] for item in junctions}:
+        raise ValueError("Unknown junction_id")
+    if not isinstance(nonce, str) or not AUTH_CONFIG["MIN_NONCE_LENGTH"] <= len(nonce) <= AUTH_CONFIG["MAX_NONCE_LENGTH"] or not re.fullmatch(r"[A-Za-z0-9_-]+", nonce):
+        raise ValueError("Invalid nonce")
+    if payload["label"] not in ("wail", "yelp", "hi-lo") or payload["approach"] not in ("approaching", "receding", "unknown"):
+        raise ValueError("Invalid acoustic label or approach state")
+    try:
+        timestamp = int(payload["timestamp"])
+        confidence, slope, r_squared = (float(payload[key]) for key in ("confidence", "slope", "r_squared"))
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("Invalid acoustic event measurements")
+    if isinstance(payload["timestamp"], bool) or timestamp != payload["timestamp"] or not all(math.isfinite(v) for v in (confidence, slope, r_squared)):
+        raise ValueError("Invalid acoustic event measurements")
+    if not 0 <= confidence <= 1 or not 0 <= r_squared <= 1 or abs(slope) > 100:
+        raise ValueError("Acoustic measurements are outside allowed bounds")
+    return {"unit_id": unit_id, "junction_id": junction_id, "timestamp": timestamp, "nonce": nonce,
+            "label": payload["label"], "confidence": confidence, "approach": payload["approach"],
+            "slope": slope, "r_squared": r_squared}
 
 
 def _distance_m(lat1, lon1, lat2, lon2):
@@ -227,6 +262,38 @@ QUEUE_CONFIG = {
     }
 }
 
+# Cross-traffic harm and fairness limits; values are provisional assumptions for this demo.
+HARM_CONFIG = {
+    "AMBULANCE_WEIGHT": 20.0,  # ASSUMPTION: vehicle-seconds of benefit per ambulance-second saved; traffic authority must set this.
+    "HARM_MARGIN": 1.0,  # ASSUMPTION: minimum benefit-to-harm ratio.
+    "MAX_PREEMPT_HOLD_S": 40.0,  # ASSUMPTION: absolute maximum preemption green hold.
+    "MIN_RECOVERY_GREEN_S": 15.0,  # ASSUMPTION: minimum service time per cross arm after release.
+    "COOLDOWN_S": 60.0,  # ASSUMPTION: minimum interval between preemptions at one junction.
+    "COOLDOWN_EXCEPTION_MIN_DELAY_S": 30.0,  # ASSUMPTION: large saved-delay threshold for a different approaching vehicle.
+    "MAX_ARM_STARVATION_S": 90.0,  # ASSUMPTION: maximum time any arm may go without service.
+    "REMAINING_RED_ESTIMATE_S": 30.0,  # ASSUMPTION: typical red time remaining without preemption; replace with signal timing data.
+    "ARRIVAL_RATE_PCU_PER_S_PER_ARM": 0.10,  # ASSUMPTION: estimated conflicting-arm arrival rate.
+    "CROSS_ARM_QUEUE_SHARE": 1.0 / 3.0  # ASSUMPTION: observed queue PCU is allocated evenly across three conflicting arms.
+}
+
+# Signal timing and conflict assumptions. Replace with values and matrices approved by the traffic authority.
+SAFETY_CONFIG = {
+    "MIN_GREEN_S": 10.0,  # ASSUMPTION: minimum green interval; authority-approved phase timing must replace this.
+    "AMBER_S": 3.0,  # ASSUMPTION: amber clearance; must match the approved signal plan.
+    "ALL_RED_S": 1.0,  # ASSUMPTION: all-red clearance; must match the approved signal plan.
+    "HEARTBEAT_TIMEOUT_S": 5.0,  # ASSUMPTION: stale decision/input heartbeat threshold.
+    "RECOMMENDATION_TTL_S": 20.0,  # ASSUMPTION: time allowed for an operator to acknowledge a recommendation.
+    "NORMAL_ARM_SERVICE_INTERVAL_S": 15.0,  # ASSUMPTION: simulated fixed-time arm service interval.
+    # ASSUMPTION: each different approach conflicts; replace this matrix with authority-approved movements.
+    "JUNCTION_CONFLICT_MATRIX": {
+        junction_id: {arm: [other for other in ("N", "E", "S", "W") if other != arm]
+                      for arm in ("N", "E", "S", "W")}
+        for junction_id in ("J1", "J2", "J3", "J4")
+    }
+}
+PREEMPT_RELEASE_AMBER_SECONDS = SAFETY_CONFIG["AMBER_S"]
+PREEMPT_RELEASE_ALL_RED_SECONDS = SAFETY_CONFIG["ALL_RED_S"]
+
 
 def calculate_queue_discharge(cars, trucks, bikes, auto_rickshaws=0, effective_lanes=2):
     """Pure saturation-flow estimate returning nominal and uncertainty bounds in seconds."""
@@ -271,6 +338,91 @@ def update_junction_queue_estimate(junction, arm="N"):
     junction["t_flush_sec"] = round(estimate["nominal_sec"], 1)
     junction["t_flush_low_sec"] = round(estimate["low_sec"], 1)
     junction["t_flush_high_sec"] = round(estimate["high_sec"], 1)
+
+
+def calculate_delay_harm(remaining_red_s, t_flush_high_s, conflicting_arms, extra_red_s):
+    """Pure estimated delay accounting and weighted minimum-harm decision."""
+    delay_without = max(0.0, remaining_red_s) + max(0.0, t_flush_high_s)
+    delay_with = max(0.0, t_flush_high_s)
+    delay_saved = delay_without - delay_with
+    queue_cost = 0.0
+    arrival_cost = 0.0
+    arm_costs = []
+    for arm in conflicting_arms:
+        queue_term = max(0.0, arm["queue_pcu"]) * extra_red_s
+        arrival_term = max(0.0, arm["arrival_rate_pcu_per_s"]) * (extra_red_s ** 2) / 2.0
+        queue_cost += queue_term
+        arrival_cost += arrival_term
+        arm_costs.append({"arm": arm["arm"], "queue_pcu": arm["queue_pcu"],
+                          "queue_delay_vehicle_s_estimate": queue_term,
+                          "arrival_delay_vehicle_s_estimate": arrival_term})
+    cross_delay = queue_cost + arrival_cost
+    benefit = delay_saved * HARM_CONFIG["AMBULANCE_WEIGHT"]
+    required_benefit = cross_delay * HARM_CONFIG["HARM_MARGIN"]
+    if delay_saved <= 0:
+        reason = "Delay saved too small"
+    elif benefit < required_benefit:
+        reason = "Net harm too high"
+    else:
+        reason = "Minimum-harm check passed"
+    return {
+        "ambulance_delay_without_s": delay_without,
+        "ambulance_delay_with_s": delay_with,
+        "delay_saved_s": delay_saved,
+        "cross_delay_added_vehicle_s": cross_delay,
+        "cross_queue_term_vehicle_s_estimate": queue_cost,
+        "cross_arrival_term_vehicle_s_estimate": arrival_cost,
+        "benefit_vehicle_s": benefit,
+        "required_benefit_vehicle_s": required_benefit,
+        "extra_red_s_estimate": extra_red_s,
+        "arm_costs": arm_costs,
+        "granted_by_harm_check": benefit >= required_benefit and delay_saved > 0,
+        "decision_reason": reason
+    }
+
+
+def choose_earliest_ambulance(requests):
+    """Return the verified request with the lowest ETA, preserving arrival order on ties."""
+    return min(requests, key=lambda item: (item["eta_s"], item.get("queued_at", 0))) if requests else None
+
+
+def hold_limit_reached(elapsed_s):
+    return elapsed_s >= HARM_CONFIG["MAX_PREEMPT_HOLD_S"]
+
+
+def cooldown_allows(last_preemption_at, now, last_vehicle_id, vehicle_id, approaching, delay_saved_s):
+    if last_preemption_at is None or now - last_preemption_at >= HARM_CONFIG["COOLDOWN_S"]:
+        return True
+    return bool(vehicle_id != last_vehicle_id and approaching and
+                delay_saved_s >= HARM_CONFIG["COOLDOWN_EXCEPTION_MIN_DELAY_S"])
+
+
+def find_starved_arms(last_served_at, now, requested_arm):
+    return [arm for arm, served_at in last_served_at.items()
+            if arm != requested_arm and now - served_at > HARM_CONFIG["MAX_ARM_STARVATION_S"]]
+
+
+def can_grant_without_conflict(signal_states):
+    # Treat clearance as occupied too; a new grant must never cut across amber/all-red.
+    return not any(state in ("PREEMPT_GREEN", "AMBER_CLEARANCE", "ALL_RED_CLEARANCE") for state in signal_states)
+
+
+def run_harm_self_checks():
+    big_saved = calculate_delay_harm(60, 10, [{"arm": "E", "queue_pcu": 1, "arrival_rate_pcu_per_s": 0.01}], 10)
+    small_saved = calculate_delay_harm(1, 10, [{"arm": "E", "queue_pcu": 100, "arrival_rate_pcu_per_s": 1}], 40)
+    closest = choose_earliest_ambulance([{"vehicle_id": "far", "eta_s": 18}, {"vehicle_id": "near", "eta_s": 7}])
+    results = [
+        ("large saved delay / small cross queue grants", True, big_saved["granted_by_harm_check"]),
+        ("small saved delay / large cross queue denies", False, small_saved["granted_by_harm_check"]),
+        ("40 second hold limit forces release", True, hold_limit_reached(HARM_CONFIG["MAX_PREEMPT_HOLD_S"])),
+        ("cooldown denies same-vehicle immediate request", False, cooldown_allows(10, 20, "v1", "v1", True, 60)),
+        ("starved cross arm blocks request", True, "E" in find_starved_arms({"N": 190, "E": 10, "S": 190}, 110, "N")),
+        ("nearer verified ambulance sorts first", "near", closest["vehicle_id"]),
+        ("active green blocks conflicting grant", False, can_grant_without_conflict(["PREEMPT_GREEN", "RED"])),
+        ("all-red clearance blocks a new grant", False, can_grant_without_conflict(["ALL_RED_CLEARANCE", "RED"]))
+    ]
+    return [{"name": name, "expected": expected, "actual": actual, "passed": expected == actual}
+            for name, expected, actual in results]
 
 # NH-206 Junctions State (CIT Gubbi to Tumakuru Corridor)
 junctions = [
@@ -326,6 +478,515 @@ junctions = [
 
 for junction in junctions:
     update_junction_queue_estimate(junction)
+
+harm_runtime = {
+    junction["id"]: {
+        "arm_last_served_at": {arm: monotonic() for arm in JUNCTION_ARM_BEARINGS[junction["id"]]},
+        "arm_recovery": {},
+        "recovery_until": 0.0,
+        "last_preemption_at": None,
+        "last_vehicle_id": None,
+        "active": None,
+        "last_decision": None,
+        "arm_cycle_index": 0,
+        "queued_requests": []
+    }
+    for junction in junctions
+}
+preemption_request_queue = []
+
+
+def harm_status_for_junction(junction_id):
+    now = monotonic()
+    state = harm_runtime[junction_id]
+    active = state.get("active") or {}
+    served = state["arm_last_served_at"]
+    starvation_remaining = min(
+        (max(0.0, HARM_CONFIG["MAX_ARM_STARVATION_S"] - (now - served_at)) for served_at in served.values()),
+        default=HARM_CONFIG["MAX_ARM_STARVATION_S"]
+    )
+    cooldown_remaining = 0.0
+    if state.get("last_preemption_at") is not None:
+        cooldown_remaining = max(0.0, HARM_CONFIG["COOLDOWN_S"] - (now - state["last_preemption_at"]))
+    return {
+        "delay_saved_s": (state.get("last_decision") or {}).get("delay_saved_s", 0.0),
+        "cross_delay_added_vehicle_s": (state.get("last_decision") or {}).get("cross_delay_added_vehicle_s", 0.0),
+        "benefit_vehicle_s": (state.get("last_decision") or {}).get("benefit_vehicle_s", 0.0),
+        "required_benefit_vehicle_s": (state.get("last_decision") or {}).get("required_benefit_vehicle_s", 0.0),
+        "reason": (state.get("last_decision") or {}).get("decision_reason", "No preemption decision yet"),
+        "hold_remaining_s": max(0.0, active.get("hold_deadline", now) - now) if active else 0.0,
+        "max_hold_s": HARM_CONFIG["MAX_PREEMPT_HOLD_S"],
+        "cooldown_remaining_s": cooldown_remaining,
+        "recovery_remaining_s": max(0.0, state.get("recovery_until", 0.0) - now),
+        "starvation_remaining_s": starvation_remaining,
+        "active_vehicle_id": active.get("vehicle_id"),
+        "active_arm": active.get("arm"),
+        "queued_requests": sorted(preemption_request_queue, key=lambda item: (item["eta_s"], item["queued_at"]))
+    }
+
+
+def _finish_arm_recovery(junction_id, arm):
+    with lock:
+        runtime = harm_runtime[junction_id]
+        runtime["arm_recovery"].pop(arm, None)
+        runtime["arm_last_served_at"][arm] = monotonic()
+
+
+def _start_arm_recovery(junction_id, arm):
+    with lock:
+        harm_runtime[junction_id]["arm_recovery"][arm] = {
+            "state": "GREEN",
+            "until": monotonic() + HARM_CONFIG["MIN_RECOVERY_GREEN_S"]
+        }
+    timer = Timer(HARM_CONFIG["MIN_RECOVERY_GREEN_S"], _finish_arm_recovery, args=(junction_id, arm))
+    timer.daemon = True
+    timer.start()
+
+
+def _record_normal_arm_service(junction_id):
+    with lock:
+        runtime = harm_runtime[junction_id]
+        if not any(item["signal_state"] == "PREEMPT_GREEN" for item in junctions):
+            arms = list(JUNCTION_ARM_BEARINGS[junction_id])
+            index = runtime["arm_cycle_index"] % len(arms)
+            runtime["arm_last_served_at"][arms[index]] = monotonic()
+            runtime["arm_cycle_index"] = (index + 1) % len(arms)
+    timer = Timer(SAFETY_CONFIG["NORMAL_ARM_SERVICE_INTERVAL_S"], _record_normal_arm_service, args=(junction_id,))
+    timer.daemon = True
+    timer.start()
+
+
+for _junction_id in harm_runtime:
+    _normal_service_timer = Timer(SAFETY_CONFIG["NORMAL_ARM_SERVICE_INTERVAL_S"], _record_normal_arm_service,
+                                  args=(_junction_id,))
+    _normal_service_timer.daemon = True
+    _normal_service_timer.start()
+
+
+controller_runtime = {
+    junction["id"]: {
+        "mode": "ADVISORY",
+        "phase_since": monotonic(),
+        "phase_arm": "N" if junction["signal_state"] == "GREEN" else None,
+        "arm_states": {arm: ("GREEN" if junction["signal_state"] == "GREEN" and arm == "N" else "RED")
+                       for arm in JUNCTION_ARM_BEARINGS[junction["id"]]},
+        "fixed_time_phase": junction["signal_state"],
+        "recommendation": None,
+        "interlock_status": "No phase request",
+        "transition_token": None
+    }
+    for junction in junctions
+}
+controller_heartbeats = {"decision": None, "input": None}
+controller_fail_safe = {"active": True, "reason": "Waiting for decision and input heartbeats"}
+
+
+def _transition_allowed(current, target, elapsed, *, arm_conflict=False):
+    """Pure timing/conflict policy; all phase transitions go through SafetyInterlock."""
+    if current in ("GREEN", "PREEMPT_GREEN") and target == "AMBER_CLEARANCE" and elapsed < SAFETY_CONFIG["MIN_GREEN_S"]:
+        return False, f"Minimum green has {SAFETY_CONFIG['MIN_GREEN_S'] - elapsed:.1f}s remaining"
+    if target == "ALL_RED_CLEARANCE":
+        if current != "AMBER_CLEARANCE":
+            return False, "All-red requires a completed amber phase"
+        if elapsed < SAFETY_CONFIG["AMBER_S"]:
+            return False, f"Amber clearance has {SAFETY_CONFIG['AMBER_S'] - elapsed:.2f}s remaining"
+    if target in ("GREEN", "PREEMPT_GREEN"):
+        if current == "ALL_RED_CLEARANCE" and elapsed < SAFETY_CONFIG["ALL_RED_S"]:
+            return False, f"All-red clearance has {SAFETY_CONFIG['ALL_RED_S'] - elapsed:.2f}s remaining"
+        if current not in ("ALL_RED_CLEARANCE", "RED"):
+            return False, "A green phase requires all-red clearance"
+        if current == "RED" and elapsed < SAFETY_CONFIG["ALL_RED_S"]:
+            return False, f"Red clearance has {SAFETY_CONFIG['ALL_RED_S'] - elapsed:.2f}s remaining"
+        if arm_conflict:
+            return False, "Conflicting green phase is already active"
+    return True, "Interlock allowed the phase change"
+
+
+class SafetyInterlock:
+    """Single gate below the controller adapter for every phase mutation."""
+    def transition_locked(self, junction_id, target_phase, arm=None, reason=""):
+        junction = next((item for item in junctions if item["id"] == junction_id), None)
+        if junction is None:
+            return False, "Unknown junction"
+        state = controller_runtime[junction_id]
+        now = monotonic()
+        current = junction["signal_state"]
+        conflict = False
+        if target_phase in ("GREEN", "PREEMPT_GREEN") and arm:
+            conflicts = SAFETY_CONFIG["JUNCTION_CONFLICT_MATRIX"][junction_id].get(arm, [])
+            conflict = any(state["arm_states"].get(other) == "GREEN" for other in conflicts)
+        allowed, detail = _transition_allowed(current, target_phase, now - state["phase_since"], arm_conflict=conflict)
+        if not allowed:
+            state["interlock_status"] = f"Blocked: {detail}"
+            _append_audit_locked("interlock_blocked", f"{detail}; requested={target_phase}; {reason}", None, junction_id)
+            return False, detail
+        junction["signal_state"] = target_phase
+        state["phase_since"] = now
+        if target_phase in ("GREEN", "PREEMPT_GREEN"):
+            state["arm_states"] = {item: ("GREEN" if item == arm else "RED") for item in JUNCTION_ARM_BEARINGS[junction_id]}
+            state["phase_arm"] = arm
+        elif target_phase in ("AMBER_CLEARANCE", "ALL_RED_CLEARANCE", "RED"):
+            state["arm_states"] = {item: "RED" for item in JUNCTION_ARM_BEARINGS[junction_id]}
+            if target_phase == "RED":
+                state["phase_arm"] = None
+        state["interlock_status"] = f"Allowed: {target_phase} via interlock"
+        return True, state["interlock_status"]
+
+
+class ControllerAdapter:
+    """Hardware-neutral controller boundary; implementations must preserve the interlock."""
+    def current_phase(self, junction): raise NotImplementedError
+    def request_phase(self, junction, arm, reason): raise NotImplementedError
+    def release(self, junction, reason="operator release"): raise NotImplementedError
+    def heartbeat(self): raise NotImplementedError
+
+
+class SimulatedController(ControllerAdapter):
+    """In-memory simulator. Transitions are timed and interlocked; it has no signal hardware."""
+    def current_phase(self, junction):
+        return junction["signal_state"]
+
+    def heartbeat(self):
+        return {key: value for key, value in controller_heartbeats.items()}
+
+    def set_corridor_status(self, junction, status):
+        # Standby is a dashboard annotation, not a commanded signal phase.
+        junction["display_status"] = status
+
+    def request_phase(self, junction, arm, reason):
+        jid = junction["id"]
+        with lock:
+            return self.request_phase_locked(junction, arm, reason)
+
+    def request_phase_locked(self, junction, arm, reason):
+        jid = junction["id"]
+        token = object()
+        state = controller_runtime[jid]
+        current = junction["signal_state"]
+        if current not in ("GREEN", "RED"):
+            state["interlock_status"] = f"Blocked: junction is in {current}"
+            _append_audit_locked("interlock_blocked", state["interlock_status"], None, jid)
+            return False, state["interlock_status"]
+        state["transition_token"] = token
+        elapsed = monotonic() - state["phase_since"]
+        delay = max(0.0, SAFETY_CONFIG["MIN_GREEN_S"] - elapsed) if current == "GREEN" else max(0.0, SAFETY_CONFIG["ALL_RED_S"] - elapsed)
+        timer = Timer(delay + 0.02, self._begin_preempt_transition, args=(jid, arm, reason, token))
+        timer.daemon = True
+        timer.start()
+        return True, f"Safety transition scheduled after {delay:.1f}s minimum-green/red wait"
+
+    def _begin_preempt_transition(self, jid, arm, reason, token):
+        with lock:
+            state = controller_runtime[jid]
+            junction = next(item for item in junctions if item["id"] == jid)
+            if state["transition_token"] is not token:
+                return
+            if junction["signal_state"] == "GREEN":
+                allowed, message = safety_interlock.transition_locked(jid, "AMBER_CLEARANCE", state["phase_arm"], reason)
+                if not allowed:
+                    Timer(max(0.05, SAFETY_CONFIG["MIN_GREEN_S"] - (monotonic() - state["phase_since"]) + 0.02),
+                          self._begin_preempt_transition, args=(jid, arm, reason, token)).start()
+                    return
+                next_delay = SAFETY_CONFIG["AMBER_S"] + 0.02
+            else:
+                next_delay = max(0.0, SAFETY_CONFIG["ALL_RED_S"] - (monotonic() - state["phase_since"])) + 0.02
+        timer = Timer(next_delay, self._begin_preempt_green, args=(jid, arm, reason, token))
+        timer.daemon = True
+        timer.start()
+
+    def _begin_preempt_green(self, jid, arm, reason, token):
+        with lock:
+            state = controller_runtime[jid]
+            junction = next(item for item in junctions if item["id"] == jid)
+            if state["transition_token"] is not token:
+                return
+            if junction["signal_state"] == "AMBER_CLEARANCE":
+                allowed, message = safety_interlock.transition_locked(jid, "ALL_RED_CLEARANCE", arm, reason)
+                if not allowed:
+                    Timer(max(0.05, SAFETY_CONFIG["AMBER_S"] - (monotonic() - state["phase_since"]) + 0.02),
+                          self._begin_preempt_green, args=(jid, arm, reason, token)).start()
+                    return
+                timer = Timer(SAFETY_CONFIG["ALL_RED_S"] + 0.02, self._finish_preempt_green, args=(jid, arm, reason, token))
+                timer.daemon = True
+                timer.start()
+                return
+            allowed, message = safety_interlock.transition_locked(jid, "PREEMPT_GREEN", arm, reason)
+            if not allowed:
+                controller_runtime[jid]["transition_token"] = None
+                return
+            context = preemption_release_sequences.get(jid, {})
+            context["hold_started_at"] = monotonic()
+            context["hold_deadline"] = context["hold_started_at"] + HARM_CONFIG["MAX_PREEMPT_HOLD_S"]
+            preemption_release_sequences[jid] = context
+            harm_runtime[jid]["active"] = {"vehicle_id": context.get("vehicle_id"), "arm": arm,
+                                           "hold_deadline": context["hold_deadline"]}
+            harm_runtime[jid]["last_preemption_at"] = context["hold_started_at"]
+            harm_runtime[jid]["last_vehicle_id"] = context.get("vehicle_id")
+            harm_runtime[jid]["arm_last_served_at"][arm] = context["hold_started_at"]
+            if not context.get("metrics_applied"):
+                impact_metrics["active_green_waves"] += 1
+                impact_metrics["golden_hour_sec_saved"] += context.get("sec_saved", 0)
+                impact_metrics["fuel_litres_saved"] = round(impact_metrics["fuel_litres_saved"] + context.get("fuel_saved", 0), 2)
+                context["metrics_applied"] = True
+                if context.get("incident"):
+                    context["incident"]["title"] = f"Emergency Green Wave Active — Queue Discharge T={context.get('t_flush_sec', 0):.1f}s"
+                    context["incident"]["detail"] = "Simulator phase is active after interlocked minimum-green, amber, and all-red sequence."
+        timer = Timer(HARM_CONFIG["MAX_PREEMPT_HOLD_S"], _force_release_at_hold_limit, args=(jid, context.get("hold_token")))
+        timer.daemon = True
+        timer.start()
+
+    def _finish_preempt_green(self, jid, arm, reason, token):
+        self._begin_preempt_green(jid, arm, reason, token)
+
+    def release(self, junction, reason="operator release"):
+        jid = junction["id"]
+        with lock:
+            state = controller_runtime[jid]
+            context = preemption_release_sequences.get(jid)
+            state["transition_token"] = None
+            if context is None:
+                context = {"previous_target_state": state["fixed_time_phase"], "downstream_id": None,
+                           "cross_arms": [], "vehicle_id": None}
+                preemption_release_sequences[jid] = context
+            token = object()
+            context["release_token"] = token
+            preemption_release_sequences[jid] = context
+            current = junction["signal_state"]
+            elapsed = monotonic() - state["phase_since"]
+            if current in ("GREEN", "PREEMPT_GREEN"):
+                delay = max(0.0, SAFETY_CONFIG["MIN_GREEN_S"] - elapsed)
+            elif current == "AMBER_CLEARANCE":
+                delay = 0.0
+            elif current == "ALL_RED_CLEARANCE":
+                delay = 0.0
+            else:
+                delay = max(0.0, SAFETY_CONFIG["ALL_RED_S"] - elapsed)
+            state["interlock_status"] = f"Safe release requested: {reason}"
+        timer = Timer(delay + 0.02, self._release_to_amber_or_all_red, args=(jid, reason, token))
+        timer.daemon = True
+        timer.start()
+        return True, f"Safe release scheduled; minimum phase and clearance times remain enforced ({delay:.1f}s wait)"
+
+    def _release_to_amber_or_all_red(self, jid, reason, token):
+        with lock:
+            context = preemption_release_sequences.get(jid, {})
+            if context.get("release_token") is not token:
+                return
+            junction = next(item for item in junctions if item["id"] == jid)
+            state = controller_runtime[jid]
+            if junction["signal_state"] in ("GREEN", "PREEMPT_GREEN"):
+                allowed, message = safety_interlock.transition_locked(jid, "AMBER_CLEARANCE", state["phase_arm"], reason)
+                if not allowed:
+                    retry = max(0.05, SAFETY_CONFIG["MIN_GREEN_S"] - (monotonic() - state["phase_since"]) + 0.02)
+                    timer = Timer(retry, self._release_to_amber_or_all_red, args=(jid, reason, token))
+                    timer.daemon = True
+                    timer.start()
+                    return
+                wait = SAFETY_CONFIG["AMBER_S"] + 0.02
+            elif junction["signal_state"] == "AMBER_CLEARANCE":
+                wait = max(0.0, SAFETY_CONFIG["AMBER_S"] - (monotonic() - state["phase_since"])) + 0.02
+            else:
+                wait = max(0.0, SAFETY_CONFIG["ALL_RED_S"] - (monotonic() - state["phase_since"])) + 0.02
+        timer = Timer(wait, self._release_to_fixed_plan, args=(jid, reason, token))
+        timer.daemon = True
+        timer.start()
+
+    def _release_to_fixed_plan(self, jid, reason, token):
+        with lock:
+            context = preemption_release_sequences.get(jid, {})
+            if context.get("release_token") is not token:
+                return
+            junction = next(item for item in junctions if item["id"] == jid)
+            state = controller_runtime[jid]
+            if junction["signal_state"] == "AMBER_CLEARANCE":
+                allowed, message = safety_interlock.transition_locked(jid, "ALL_RED_CLEARANCE", None, reason)
+                if not allowed:
+                    retry = max(0.05, SAFETY_CONFIG["AMBER_S"] - (monotonic() - state["phase_since"]) + 0.02)
+                    timer = Timer(retry, self._release_to_fixed_plan, args=(jid, reason, token))
+                    timer.daemon = True
+                    timer.start()
+                    return
+                wait = SAFETY_CONFIG["ALL_RED_S"] + 0.02
+            else:
+                wait = max(0.0, SAFETY_CONFIG["ALL_RED_S"] - (monotonic() - state["phase_since"])) + 0.02
+        timer = Timer(wait, self._finish_release, args=(jid, reason, token))
+        timer.daemon = True
+        timer.start()
+
+    def _finish_release(self, jid, reason, token):
+        with lock:
+            context = preemption_release_sequences.get(jid, {})
+            if context.get("release_token") is not token:
+                return
+            junction = next(item for item in junctions if item["id"] == jid)
+            state = controller_runtime[jid]
+            fixed = context.get("previous_target_state", state["fixed_time_phase"])
+            fixed = "GREEN" if fixed == "PREEMPT_GREEN" else fixed
+            fixed_arm = state["phase_arm"] or "N"
+            allowed, message = safety_interlock.transition_locked(jid, fixed, fixed_arm if fixed == "GREEN" else None, reason)
+            if not allowed:
+                _append_audit_locked("interlock_blocked", f"Fixed-time restore blocked: {message}; fail-safe keeps junction non-green", None, jid)
+                return
+            context = preemption_release_sequences.pop(jid, {})
+            downstream = next((item for item in junctions if item["id"] == context.get("downstream_id")), None)
+            if downstream and downstream.get("display_status") == "GREEN_WAVE_STANDBY":
+                self.set_corridor_status(downstream, None)
+            if context.get("metrics_applied"):
+                impact_metrics["active_green_waves"] = max(0, impact_metrics["active_green_waves"] - 1)
+            harm = harm_runtime[jid]
+            harm["active"] = None
+            recovery_arms = context.get("cross_arms", [])
+            harm["recovery_until"] = monotonic() + len(recovery_arms) * HARM_CONFIG["MIN_RECOVERY_GREEN_S"]
+            for index, arm_id in enumerate(recovery_arms):
+                timer = Timer(index * HARM_CONFIG["MIN_RECOVERY_GREEN_S"], _start_arm_recovery, args=(jid, arm_id))
+                timer.daemon = True
+                timer.start()
+            _append_audit_locked("controller_release", f"Returned to fixed-time plan through amber/all-red interlock: {reason}", context.get("vehicle_id"), jid)
+
+
+class ModelSignalController(ControllerAdapter):
+    """No-I/O hardware stub. A future approved adapter would translate these calls to a vendor interface,
+    for example an ESP32 LED training model over HTTP or serial, while retaining this interlock. Nothing connects here."""
+    def current_phase(self, junction): return {"supported": False, "reason": "No real controller connection configured"}
+    def request_phase(self, junction, arm, reason): return False, "Model controller is a non-connecting stub"
+    def release(self, junction, reason="operator release"): return False, "Model controller is a non-connecting stub"
+    def heartbeat(self): return {"supported": False, "reason": "No hardware connection configured"}
+
+
+safety_interlock = SafetyInterlock()
+controller_adapter = SimulatedController()
+
+
+def _require_admin_token():
+    return bool(ADMIN_TOKEN and hmac.compare_digest(request.headers.get("X-Admin-Token", ""), ADMIN_TOKEN))
+
+
+def _heartbeat_is_stale(source, now=None):
+    stamp = controller_heartbeats.get(source)
+    return stamp is None or (monotonic() if now is None else now) - stamp > SAFETY_CONFIG["HEARTBEAT_TIMEOUT_S"]
+
+
+def should_apply_recommendation(mode, _operator_confirmed=False):
+    # Advisory confirmation records review only; only the simulator mode executes a phase request.
+    return mode == "DEMO_AUTO"
+
+
+def recommendation_expired(expires_at, now):
+    return now >= expires_at
+
+
+def admin_token_valid(supplied, expected):
+    return bool(expected) and hmac.compare_digest(str(supplied or ""), expected)
+
+
+def safe_release_sequence_allowed():
+    return all((
+        _transition_allowed("PREEMPT_GREEN", "AMBER_CLEARANCE", SAFETY_CONFIG["MIN_GREEN_S"])[0],
+        _transition_allowed("AMBER_CLEARANCE", "ALL_RED_CLEARANCE", SAFETY_CONFIG["AMBER_S"])[0],
+        _transition_allowed("ALL_RED_CLEARANCE", "GREEN", SAFETY_CONFIG["ALL_RED_S"])[0]
+    ))
+
+
+def _recommendation_status(junction_id):
+    state = controller_runtime[junction_id]
+    recommendation = state.get("recommendation")
+    if recommendation and recommendation["expires_at"] <= monotonic():
+        return None
+    if recommendation:
+        recommendation = dict(recommendation, expires_in_s=max(0.0, recommendation["expires_at"] - monotonic()))
+    return recommendation
+
+
+def controller_status():
+    now = monotonic()
+    stale = [source for source in controller_heartbeats if _heartbeat_is_stale(source, now)]
+    controller_fail_safe["active"] = bool(stale)
+    if stale:
+        controller_fail_safe["reason"] = "Heartbeat timeout: " + ", ".join(stale)
+    elif not controller_fail_safe.get("reason"):
+        controller_fail_safe["reason"] = "Heartbeats healthy"
+    return {
+        "adapter": "SimulatedController",
+        "banner": "SIMULATION, NOT CONNECTED TO REAL SIGNALS",
+        "fail_safe_active": controller_fail_safe["active"],
+        "fail_safe_reason": controller_fail_safe["reason"],
+        "heartbeat_timeout_s": SAFETY_CONFIG["HEARTBEAT_TIMEOUT_S"],
+        "interlock_status": {jid: state["interlock_status"] for jid, state in controller_runtime.items()}
+    }
+
+
+def _expire_recommendation(junction_id, recommendation_id):
+    with lock:
+        recommendation = controller_runtime[junction_id].get("recommendation")
+        if recommendation and recommendation["id"] == recommendation_id and recommendation["expires_at"] <= monotonic():
+            controller_runtime[junction_id]["recommendation"] = None
+            _append_audit_locked("recommendation_expired", "Operator recommendation expired without confirmation; no phase was changed",
+                                 recommendation.get("vehicle_id"), junction_id)
+
+
+def _controller_watchdog():
+    now = monotonic()
+    releases = []
+    with lock:
+        stale = [source for source in controller_heartbeats if _heartbeat_is_stale(source, now)]
+        was_active = controller_fail_safe["active"]
+        controller_fail_safe["active"] = bool(stale)
+        controller_fail_safe["reason"] = "Heartbeat timeout: " + ", ".join(stale) if stale else "Heartbeats healthy"
+        if stale and not was_active:
+            _append_audit_locked("fail_safe", controller_fail_safe["reason"] + "; cancel pending actions and return through safe release", None, None)
+        for jid, state in controller_runtime.items():
+            rec = state.get("recommendation")
+            if rec and (stale or rec["expires_at"] <= now):
+                state["recommendation"] = None
+                _append_audit_locked("recommendation_cancelled" if stale else "recommendation_expired",
+                                     "Heartbeat fail-safe cancelled advisory; no phase was changed" if stale else "Operator recommendation expired without confirmation; no phase was changed",
+                                     rec.get("vehicle_id"), jid)
+            junction = next(item for item in junctions if item["id"] == jid)
+            if stale and not was_active and (junction["signal_state"] in ("PREEMPT_GREEN", "AMBER_CLEARANCE", "ALL_RED_CLEARANCE") or state["transition_token"] is not None):
+                state["transition_token"] = None
+                releases.append(jid)
+    for jid in releases:
+        junction = next(item for item in junctions if item["id"] == jid)
+        controller_adapter.release(junction, "heartbeat timeout fail-safe")
+    timer = Timer(1.0, _controller_watchdog)
+    timer.daemon = True
+    timer.start()
+
+
+_watchdog_timer = Timer(1.0, _controller_watchdog)
+_watchdog_timer.daemon = True
+_watchdog_timer.start()
+
+
+def run_controller_self_checks():
+    results = []
+    def check(name, expected, actual):
+        results.append({"name": name, "expected": expected, "actual": actual, "passed": expected == actual})
+    check("Advisory mode does not apply before operator confirmation", False, should_apply_recommendation("ADVISORY", False))
+    check("Amber/all-red timing blocks an unsafe green", False,
+          _transition_allowed("AMBER_CLEARANCE", "PREEMPT_GREEN", 0.0)[0])
+    check("Conflicting green is rejected", False,
+          _transition_allowed("ALL_RED_CLEARANCE", "PREEMPT_GREEN", SAFETY_CONFIG["ALL_RED_S"], arm_conflict=True)[0])
+    check("Heartbeat timeout releases to the fixed-time phase safely", True,
+          _heartbeat_is_stale("input", monotonic() + SAFETY_CONFIG["HEARTBEAT_TIMEOUT_S"] + 1) and safe_release_sequence_allowed())
+    check("Manual override follows the interlock release sequence", True, safe_release_sequence_allowed())
+    check("Expired recommendation is not valid", True, recommendation_expired(monotonic() - 1, monotonic()))
+    check("Missing admin token is rejected", False, admin_token_valid("", ADMIN_TOKEN))
+    return results
+
+
+def _force_release_at_hold_limit(junction_id, hold_token):
+    with lock:
+        context = preemption_release_sequences.get(junction_id, {})
+        if context.get("hold_token") is not hold_token:
+            return
+        target = next((item for item in junctions if item["id"] == junction_id), None)
+        if not target or target["signal_state"] != "PREEMPT_GREEN":
+            return
+        _append_audit_locked("max_hold_release", f"Maximum {HARM_CONFIG['MAX_PREEMPT_HOLD_S']:.0f}-second preemption hold reached; beginning mandatory amber/all-red release",
+                             context.get("vehicle_id"), junction_id)
+    with app.test_request_context("/api/preempt/release", method="POST", json={"junction_id": junction_id}):
+        release_preempt()
 
 # Combined Master Incidents List (Both Bengaluru and NH-206 Scenarios)
 incidents = [
@@ -500,7 +1161,11 @@ def get_summary_dict() -> dict:
         "demo": True,
         # S2 Architecture Extended Keys
         "active_scenario": active_scenario,
-        "junctions": [dict(j) for j in junctions],
+        "junctions": [dict(j, harm_status=harm_status_for_junction(j["id"]),
+                            controller_mode=controller_runtime[j["id"]]["mode"],
+                            interlock_status=controller_runtime[j["id"]]["interlock_status"],
+                            recommendation=_recommendation_status(j["id"])) for j in junctions],
+        "controller_status": controller_status(),
         "impact_metrics": dict(impact_metrics),
         "telematics_clusters": dict(telematics_clusters)
     }
@@ -604,6 +1269,135 @@ def set_vehicle_status(vehicle_id):
     return jsonify({"ok": True, "vehicle_id": vehicle_id, "status": status})
 
 
+@app.post("/api/unit/enroll")
+def enroll_junction_unit():
+    payload = request.get_json(silent=True) or {}
+    unit_id, junction_id, public_key_b64 = payload.get("unit_id"), payload.get("junction_id"), payload.get("public_key")
+    if (not isinstance(unit_id, str) or len(unit_id) > AUTH_CONFIG["MAX_VEHICLE_ID_LENGTH"] or
+            not re.fullmatch(r"[A-Za-z0-9_-]+", unit_id or "")):
+        return jsonify({"ok": False, "reason": "Invalid unit_id"}), 400
+    if junction_id not in {item["id"] for item in junctions}:
+        return jsonify({"ok": False, "reason": "Unknown junction_id"}), 400
+    if not isinstance(public_key_b64, str) or len(public_key_b64) > AUTH_CONFIG["MAX_PUBLIC_KEY_B64_LENGTH"]:
+        return jsonify({"ok": False, "reason": "Public key is missing or too large"}), 400
+    try:
+        key = serialization.load_der_public_key(base64.b64decode(public_key_b64, validate=True))
+    except (TypeError, ValueError, base64.binascii.Error):
+        return jsonify({"ok": False, "reason": "Invalid public key encoding"}), 400
+    if not isinstance(key, ec.EllipticCurvePublicKey) or not isinstance(key.curve, ec.SECP256R1):
+        return jsonify({"ok": False, "reason": "Only ECDSA P-256 public keys are accepted"}), 400
+    with lock:
+        existing = junction_unit_registry.get(unit_id)
+        if existing:
+            if existing["public_key_b64"] != public_key_b64 or existing["junction_id"] != junction_id:
+                return jsonify({"ok": False, "reason": "Unit ID is already enrolled with another key or junction"}), 409
+            return jsonify({"ok": True, "unit_id": unit_id, "junction_id": junction_id, "status": existing["status"]})
+        if len(junction_unit_registry) >= AUTH_CONFIG["MAX_JUNCTION_UNITS"]:
+            return jsonify({"ok": False, "reason": "Junction unit registry is full"}), 507
+        junction_unit_registry[unit_id] = {"junction_id": junction_id, "status": "pending",
+            "public_key_b64": public_key_b64, "public_key": key,
+            "enrolled_at": datetime.now(timezone.utc).isoformat(), "event_times": deque(), "latest_event": None}
+        _append_audit_locked("enrolled", "Junction unit key awaiting admin approval", unit_id, junction_id)
+    return jsonify({"ok": True, "unit_id": unit_id, "junction_id": junction_id, "status": "pending"}), 201
+
+
+@app.get("/api/units")
+def list_junction_units():
+    with lock:
+        units = [{"unit_id": uid, "junction_id": unit["junction_id"], "status": unit["status"],
+                  "enrolled_at": unit["enrolled_at"],
+                  "last_event_at": unit["latest_event"]["received_at"] if unit.get("latest_event") else None}
+                 for uid, unit in junction_unit_registry.items()]
+    return jsonify({"units": units})
+
+
+@app.post("/api/dev/unit/<unit_id>/status")
+def set_junction_unit_status(unit_id):
+    if not ADMIN_TOKEN or not hmac.compare_digest(request.headers.get("X-Admin-Token", ""), ADMIN_TOKEN):
+        return jsonify({"ok": False, "reason": "Admin approval requires the configured ADMIN_TOKEN"}), 401
+    status = (request.get_json(silent=True) or {}).get("status")
+    if status not in ("approved", "revoked"):
+        return jsonify({"ok": False, "reason": "Status must be approved or revoked"}), 400
+    with lock:
+        unit = junction_unit_registry.get(unit_id)
+        if not unit:
+            return jsonify({"ok": False, "reason": "Junction unit not found"}), 404
+        unit["status"] = status
+        if status == "revoked":
+            unit["latest_event"] = None
+        _append_audit_locked(status, f"Admin set junction unit status to {status}", unit_id, unit["junction_id"])
+    return jsonify({"ok": True, "unit_id": unit_id, "status": status})
+
+
+@app.post("/api/unit/event")
+def junction_unit_event():
+    payload = request.get_json(silent=True) or {}
+    try:
+        canonical = _canonical_unit_event(payload)
+    except ValueError as error:
+        _audit("denied", f"Acoustic event rejected: {error}", payload.get("unit_id"), payload.get("junction_id"))
+        return jsonify({"ok": False, "decision": "DENIED", "reason": str(error)}), 400
+    unit_id, junction_id = canonical["unit_id"], canonical["junction_id"]
+    try:
+        signature = base64.b64decode(payload.get("signature", ""), validate=True)
+    except (TypeError, ValueError, base64.binascii.Error):
+        signature = b""
+    if len(signature) != 64:
+        _audit("denied", "Acoustic event signature must be raw 64-byte r||s", unit_id, junction_id)
+        return jsonify({"ok": False, "decision": "DENIED", "reason": "Invalid ECDSA signature length"}), 400
+    canonical_bytes = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    der_signature = encode_dss_signature(int.from_bytes(signature[:32], "big"), int.from_bytes(signature[32:], "big"))
+    now = datetime.now(timezone.utc).timestamp()
+    with lock:
+        unit = junction_unit_registry.get(unit_id)
+        if not unit or unit["status"] != "approved":
+            status = unit["status"] if unit else "unknown"
+            reason = f"WATCH: junction unit is {status}; acoustic event is untrusted"
+            _append_audit_locked("watch", reason, unit_id, junction_id)
+            return jsonify({"ok": False, "decision": "WATCH", "reason": reason}), 403
+        if unit["junction_id"] != junction_id:
+            reason = "MISMATCH: junction unit is assigned to a different junction"
+            _append_audit_locked("denied", reason, unit_id, junction_id)
+            return jsonify({"ok": False, "decision": "MISMATCH", "reason": reason}), 403
+        try:
+            unit["public_key"].verify(der_signature, canonical_bytes, ec.ECDSA(hashes.SHA256()))
+        except InvalidSignature:
+            _append_audit_locked("denied", "Acoustic event signature verification failed", unit_id, junction_id)
+            return jsonify({"ok": False, "decision": "DENIED", "reason": "Signature verification failed"}), 401
+        age = now - canonical["timestamp"]
+        if age < 0 or age > AUTH_CONFIG["TOKEN_MAX_AGE_S"]:
+            reason = "Acoustic event timestamp is future-dated or stale"
+            _append_audit_locked("denied", reason, unit_id, junction_id)
+            return jsonify({"ok": False, "decision": "DENIED", "reason": reason}), 401
+        nonce_key = f"unit:{unit_id}:{canonical['nonce']}"
+        for key, seen_at in list(seen_nonces.items()):
+            if now - seen_at > AUTH_CONFIG["NONCE_WINDOW_S"]:
+                seen_nonces.pop(key, None)
+        if nonce_key in seen_nonces:
+            _append_audit_locked("denied", "Acoustic event nonce replay detected", unit_id, junction_id)
+            return jsonify({"ok": False, "decision": "DENIED", "reason": "Nonce replay detected"}), 409
+        times = unit["event_times"]
+        while times and now - times[0] > AUTH_CONFIG["REPORT_RATE_WINDOW_S"]:
+            times.popleft()
+        if len(times) >= AUTH_CONFIG["MAX_REPORTS_PER_WINDOW"]:
+            _append_audit_locked("denied", "Junction unit event rate limit exceeded", unit_id, junction_id)
+            return jsonify({"ok": False, "decision": "DENIED", "reason": "Rate limit exceeded"}), 429
+        seen_nonces[nonce_key] = now
+        times.append(now)
+        while len(seen_nonces) > AUTH_CONFIG["MAX_STORED_NONCES"]:
+            oldest = min(seen_nonces, key=seen_nonces.get)
+            seen_nonces.pop(oldest, None)
+        event_id = hashlib.sha256(canonical_bytes + signature).hexdigest()
+        event = {**canonical, "event_id": event_id, "received_at": datetime.now(timezone.utc).isoformat(), "verified": True}
+        unit["latest_event"] = event
+        acoustic_event_registry[event_id] = event
+        if len(acoustic_event_registry) > AUTH_CONFIG["MAX_STORED_NONCES"]:
+            acoustic_event_registry.pop(next(iter(acoustic_event_registry)))
+        controller_heartbeats["input"] = monotonic()
+        _append_audit_locked("acoustic_verified", "Signed junction acoustic event accepted", unit_id, junction_id)
+    return jsonify({"ok": True, "decision": "VERIFIED", "event_id": event_id, "unit_id": unit_id, "junction_id": junction_id})
+
+
 @app.post("/api/vehicle/report")
 def vehicle_report():
     payload = request.get_json(silent=True) or {}
@@ -703,6 +1497,7 @@ def vehicle_report():
         }
         report["junctions"] = _report_metrics(report, previous)
         vehicle["latest_report"] = report
+        controller_heartbeats["input"] = monotonic()
         _append_audit_locked("report_verified", "Signed vehicle position accepted", vehicle_id)
 
         selected = report["junctions"].get(request.args.get("junction_id", "J2"), {})
@@ -733,6 +1528,111 @@ def get_audit_log():
                 break
             previous = expected
     return jsonify({"chain_valid": valid, "entries": audit_entries[-100:]})
+
+
+@app.get("/api/dev/harm-self-check")
+def harm_self_check_endpoint():
+    results = run_harm_self_checks()
+    return jsonify({"ok": all(item["passed"] for item in results), "results": results})
+
+
+@app.get("/api/dev/controller-self-check")
+def controller_self_check_endpoint():
+    results = run_controller_self_checks()
+    return jsonify({"ok": all(item["passed"] for item in results), "results": results})
+
+
+@app.post("/api/controller/heartbeat")
+def controller_heartbeat_endpoint():
+    payload = request.get_json(silent=True) or {}
+    source = payload.get("source")
+    if source not in ("decision", "input"):
+        return jsonify({"ok": False, "reason": "Heartbeat source must be decision or input"}), 400
+    with lock:
+        was_active = controller_fail_safe["active"]
+        controller_heartbeats[source] = monotonic()
+        stale = [item for item in controller_heartbeats if _heartbeat_is_stale(item)]
+        controller_fail_safe["active"] = bool(stale)
+        controller_fail_safe["reason"] = "Heartbeat timeout: " + ", ".join(stale) if stale else "Heartbeats healthy"
+        if was_active and not stale:
+            _append_audit_locked("fail_safe_cleared", "Decision and input heartbeats restored", None, None)
+    controller_adapter.heartbeat()
+    return jsonify({"ok": True, **controller_status()})
+
+
+@app.post("/api/controller/mode")
+def set_controller_mode():
+    payload = request.get_json(silent=True) or {}
+    if not _require_admin_token():
+        _audit("controller_mode_denied", "Controller mode change rejected: missing or invalid ADMIN_TOKEN", None, payload.get("junction_id"))
+        return jsonify({"ok": False, "reason": "Changing controller mode requires the configured ADMIN_TOKEN"}), 401
+    junction_id, mode = payload.get("junction_id"), payload.get("mode")
+    if junction_id not in controller_runtime or mode not in ("ADVISORY", "DEMO_AUTO"):
+        return jsonify({"ok": False, "reason": "Provide a known junction and ADVISORY or DEMO_AUTO mode"}), 400
+    with lock:
+        state = controller_runtime[junction_id]
+        junction = next(item for item in junctions if item["id"] == junction_id)
+        if junction["signal_state"] in ("PREEMPT_GREEN", "AMBER_CLEARANCE", "ALL_RED_CLEARANCE"):
+            _append_audit_locked("controller_mode_denied", "Controller mode change rejected during active phase transition or preemption", None, junction_id)
+            return jsonify({"ok": False, "reason": "Mode cannot change during an active phase transition or preemption"}), 409
+        previous = state["mode"]
+        state["mode"] = mode
+        if state["recommendation"]:
+            _append_audit_locked("recommendation_cancelled", "Controller mode changed; pending recommendation cancelled", state["recommendation"].get("vehicle_id"), junction_id)
+            state["recommendation"] = None
+        _append_audit_locked("controller_mode", f"Controller mode changed {previous} -> {mode}", None, junction_id)
+    return jsonify({"ok": True, "junction_id": junction_id, "mode": mode})
+
+
+@app.post("/api/controller/recommendation/<recommendation_id>/confirm")
+def confirm_controller_recommendation(recommendation_id):
+    with lock:
+        match = next(((jid, controller_runtime[jid]["recommendation"]) for jid in controller_runtime
+                      if (controller_runtime[jid].get("recommendation") or {}).get("id") == recommendation_id), None)
+        if not match:
+            return jsonify({"ok": False, "reason": "Recommendation not found or already expired"}), 404
+        junction_id, recommendation = match
+        if recommendation_expired(recommendation["expires_at"], monotonic()):
+            controller_runtime[junction_id]["recommendation"] = None
+            _append_audit_locked("recommendation_expired", "Recommendation expired before operator confirmation; no phase applied", recommendation.get("vehicle_id"), junction_id)
+            return jsonify({"ok": False, "reason": "Recommendation expired; no phase was applied"}), 410
+        controller_runtime[junction_id]["recommendation"] = None
+        controller_runtime[junction_id]["interlock_status"] = "Operator confirmed recommendation; execute only through an authorized external controller"
+        _append_audit_locked("recommendation_confirmed", "Operator confirmed advisory; no signal phase was changed", recommendation.get("vehicle_id"), junction_id)
+    return jsonify({"ok": True, "decision": "CONFIRMED_ADVISORY", "applied": False,
+                    "reason": "Advisory confirmation recorded. This prototype does not apply the signal phase."})
+
+
+@app.post("/api/controller/recommendation/<recommendation_id>/dismiss")
+def dismiss_controller_recommendation(recommendation_id):
+    with lock:
+        match = next(((jid, controller_runtime[jid]["recommendation"]) for jid in controller_runtime
+                      if (controller_runtime[jid].get("recommendation") or {}).get("id") == recommendation_id), None)
+        if not match:
+            return jsonify({"ok": False, "reason": "Recommendation not found or already expired"}), 404
+        junction_id, recommendation = match
+        controller_runtime[junction_id]["recommendation"] = None
+        _append_audit_locked("recommendation_dismissed", "Operator dismissed advisory; no phase was changed", recommendation.get("vehicle_id"), junction_id)
+    return jsonify({"ok": True, "decision": "DISMISSED", "applied": False})
+
+
+@app.post("/api/controller/override")
+def controller_manual_override():
+    payload = request.get_json(silent=True) or {}
+    junction_id = payload.get("junction_id")
+    junction = next((item for item in junctions if item["id"] == junction_id), None)
+    if not junction:
+        return jsonify({"ok": False, "reason": "Unknown junction"}), 404
+    with lock:
+        state = controller_runtime[junction_id]
+        state["recommendation"] = None
+        if state["mode"] == "ADVISORY" and junction["signal_state"] not in ("PREEMPT_GREEN", "AMBER_CLEARANCE", "ALL_RED_CLEARANCE"):
+            _append_audit_locked("manual_override", "Advisory mode is already on the fixed-time plan; no phase changed", None, junction_id)
+            return jsonify({"ok": True, "decision": "FIXED_TIME", "reason": "ADVISORY: already on the fixed-time plan; no phase changed."})
+        _append_audit_locked("manual_override", "Operator requested fixed-time plan through controller adapter and safety interlock", None, junction_id)
+    accepted, reason = controller_adapter.release(junction, "manual override to fixed-time plan")
+    return jsonify({"ok": accepted, "decision": "FAILSAFE_RELEASE" if accepted else "BLOCKED",
+                    "reason": reason, "interlock_status": controller_runtime[junction_id]["interlock_status"]}), 200 if accepted else 409
 
 @app.get("/api/incidents")
 def get_incidents():
@@ -825,6 +1725,10 @@ def trigger_preempt():
             reason = "Unknown target junction"
             _append_audit_locked("denied", reason, vehicle_id, junction_id)
             return jsonify({"ok": False, "decision": "DENIED", "reason": reason}), 400
+        if controller_fail_safe["active"]:
+            reason = "FAIL-SAFE ACTIVE: controller inputs are stale; no preemption action is allowed"
+            _append_audit_locked("denied", reason, vehicle_id, junction_id)
+            return jsonify({"ok": False, "decision": "FAIL_SAFE", "reason": reason}), 503
 
         vehicle = vehicle_registry.get(vehicle_id) if vehicle_id else None
         if not vehicle or vehicle["status"] != "approved" or not vehicle.get("latest_report"):
@@ -853,15 +1757,12 @@ def trigger_preempt():
         ambulance_speed_kmh = report["speed_value"]
         arm = metrics.get("arm")
         approaching = metrics.get("approaching", False)
-        try:
-            approach_conf = float(payload.get("approach_conf", 0))
-        except (TypeError, ValueError):
-            approach_conf = 0.0
-        approach = payload.get("approach")
+        approach_conf = 0.0
+        approach = "unknown"
 
         # A fresh signed location alone only arms the junction; it can never grant green.
-        if stage == "armed" or not siren_confirmed:
-            reason = "ARMED: verified vehicle is in warning range; waiting for local siren confirmation"
+        if stage == "armed":
+            reason = "ARMED: verified vehicle is in warning range; waiting for a signed junction acoustic event"
             _append_audit_locked("armed", reason, vehicle_id, junction_id)
             return jsonify({"ok": True, "decision": "ARMED", "reason": reason,
                             "distance_m": round(distance_m, 1), "eta_s": round(eta_s, 1) if eta_s is not None else None}), 200
@@ -870,10 +1771,44 @@ def trigger_preempt():
             _append_audit_locked("denied", reason, vehicle_id, junction_id)
             return jsonify({"ok": False, "decision": "DENIED", "reason": reason}), 400
         if distance_m > _mic_range_m():
-            reason = f"MISMATCH: microphone reports a siren, but signed vehicle position is {round(distance_m)} m away"
+            reason = f"MISMATCH: verified vehicle position is {round(distance_m)} m away, outside mic range"
             _append_audit_locked("denied", reason, vehicle_id, junction_id)
             return jsonify({"ok": False, "decision": "MISMATCH", "reason": reason,
                             "distance_m": round(distance_m, 1)}), 403
+        event_id = payload.get("unit_event_id")
+        acoustic = acoustic_event_registry.get(event_id) if isinstance(event_id, str) else None
+        if not acoustic or not acoustic.get("verified"):
+            reason = "WATCH: unsigned siren claim; no green granted" if siren_confirmed else "ARMED: waiting for a fresh signed junction acoustic event"
+            _append_audit_locked("watch" if siren_confirmed else "armed", reason, vehicle_id, junction_id)
+            return jsonify({"ok": False, "decision": "WATCH" if siren_confirmed else "ARMED", "reason": reason}), 200
+        acoustic_unit = junction_unit_registry.get(acoustic["unit_id"])
+        event_age_s = datetime.now(timezone.utc).timestamp() - acoustic["timestamp"]
+        if (event_age_s < 0 or event_age_s > AUTH_CONFIG["ACOUSTIC_MAX_AGE_S"] or
+                not acoustic_unit or acoustic_unit["status"] != "approved" or
+                acoustic_unit["junction_id"] != junction_id or acoustic["junction_id"] != junction_id):
+            reason = "DENIED: signed acoustic event is stale, revoked, or assigned to another junction"
+            _append_audit_locked("denied", reason, vehicle_id, junction_id)
+            return jsonify({"ok": False, "decision": "DENIED", "reason": reason}), 403
+        report_skew_s = acoustic["timestamp"] - report["timestamp"]
+        if abs(report_skew_s) > AUTH_CONFIG["ACOUSTIC_POSITION_TIME_TOLERANCE_S"]:
+            reason = "MISMATCH: acoustic event is not time-aligned with the verified vehicle position"
+            _append_audit_locked("denied", reason, vehicle_id, junction_id)
+            return jsonify({"ok": False, "decision": "MISMATCH", "reason": reason}), 403
+        estimated_event_distance = distance_m - report["speed_value"] / 3.6 * report_skew_s
+        if estimated_event_distance > _mic_range_m() + AUTH_CONFIG["ACOUSTIC_POSITION_TOLERANCE_M"]:
+            reason = f"MISMATCH: vehicle was outside mic range at acoustic event time ({estimated_event_distance:.0f} m estimated)"
+            _append_audit_locked("denied", reason, vehicle_id, junction_id)
+            return jsonify({"ok": False, "decision": "MISMATCH", "reason": reason}), 403
+        if acoustic["approach"] == "receding" and approaching:
+            reason = "MISMATCH: signed event says RECEDING while verified vehicle is approaching"
+            _append_audit_locked("denied", reason, vehicle_id, junction_id)
+            return jsonify({"ok": False, "decision": "MISMATCH", "reason": reason}), 403
+        approach = acoustic["approach"]
+        approach_conf = acoustic["r_squared"]
+        if acoustic.get("consumed"):
+            reason = "DENIED: signed acoustic event has already been used"
+            _append_audit_locked("denied", reason, vehicle_id, junction_id)
+            return jsonify({"ok": False, "decision": "DENIED", "reason": reason}), 409
         if not approaching:
             reason = "Verified position is not approaching the selected junction"
             _append_audit_locked("denied", reason, vehicle_id, junction_id)
@@ -882,10 +1817,11 @@ def trigger_preempt():
             reason = "Verified heading does not match a known arm of this junction"
             _append_audit_locked("denied", reason, vehicle_id, junction_id)
             return jsonify({"ok": False, "decision": "DENIED", "reason": reason}), 403
-        if approach != "approaching" or not math.isfinite(approach_conf) or approach_conf < AUTH_CONFIG["APPROACH_CONF_MIN"]:
+        if acoustic["label"] not in ("wail", "yelp", "hi-lo") or approach != "approaching" or not math.isfinite(approach_conf) or approach_conf < AUTH_CONFIG["APPROACH_CONF_MIN"]:
             reason = "Siren loudness trend is not confidently approaching"
             _append_audit_locked("denied", reason, vehicle_id, junction_id)
             return jsonify({"ok": False, "decision": "DENIED", "reason": reason}), 403
+        acoustic["consumed"] = True
 
         # Ignore client distance, ETA, speed, and arm; use the signed report-derived values.
         payload["distance_m"] = distance_m
@@ -897,13 +1833,13 @@ def trigger_preempt():
         trucks = int(payload.get("trucks", target_j["trucks"]))
         bikes = int(payload.get("bikes", target_j["bikes"]))
         ambulance_dist_m = distance_m
-        pending_release = preemption_release_sequences.pop(target_j["id"], None)
+        pending_release = preemption_release_sequences.get(target_j["id"])
+        if pending_release and target_j["signal_state"] not in ("PREEMPT_GREEN", "AMBER_CLEARANCE", "ALL_RED_CLEARANCE"):
+            pending_release = preemption_release_sequences.pop(target_j["id"], None)
         previous_target_state = pending_release["previous_target_state"] if pending_release else target_j["signal_state"]
         previous_downstream_state = pending_release["previous_downstream_state"] if pending_release else None
-        siren_confidence = max(0.0, min(1.0, float(payload.get("siren_confidence", 0.0))))
-        siren_label = payload.get("siren_label", "none")
-        if siren_label not in ("wail", "yelp", "hi-lo", "none"):
-            siren_label = "none"
+        siren_confidence = acoustic["confidence"]
+        siren_label = acoustic["label"]
 
         lanes = QUEUE_CONFIG["LANES_PER_JUNCTION_ARM"].get(target_j["id"], {}).get(arm, 2)
         queue_estimate = calculate_queue_discharge(cars, trucks, bikes, target_j.get("auto_rickshaws", 0), lanes)
@@ -917,7 +1853,7 @@ def trigger_preempt():
         if green_start_in < 0:
             reason = (f"TOO LATE: queue will not clear in time; ETA {eta_sec:.1f}s is below "
                       f"the conservative queue-discharge estimate {t_flush_high:.1f}s")
-            _append_audit_locked("denied", reason, vehicle_id, junction_id)
+            _append_audit_locked("denied", f"{reason}; ETA={eta_sec:.1f}s; T_flush_high={t_flush_high:.1f}s; green_start_in={green_start_in:.1f}s", vehicle_id, junction_id)
             return jsonify({"ok": False, "decision": "TOO_LATE", "reason": reason,
                             "eta_s": round(eta_sec, 1), "t_flush_sec": round(t_flush, 1),
                             "t_flush_low_sec": round(queue_estimate["low_sec"], 1),
@@ -926,19 +1862,161 @@ def trigger_preempt():
         if green_start_in > QUEUE_CONFIG["GREEN_START_EARLY_BUFFER_S"]:
             reason = (f"Queue-discharge start in {green_start_in:.1f}s; the conservative clearance "
                       "estimate will be rechecked before green")
-            _append_audit_locked("timing_wait", reason, vehicle_id, junction_id)
+            _append_audit_locked("timing_wait", f"{reason}; ETA={eta_sec:.1f}s; T_flush_high={t_flush_high:.1f}s; green_start_in={green_start_in:.1f}s", vehicle_id, junction_id)
             return jsonify({"ok": True, "decision": "WAIT", "reason": reason,
                             "eta_s": round(eta_sec, 1), "t_flush_sec": round(t_flush, 1),
                             "t_flush_low_sec": round(queue_estimate["low_sec"], 1),
                             "t_flush_high_sec": round(t_flush_high, 1),
                             "green_start_in": round(green_start_in, 1)}), 200
 
+        harm_state = harm_runtime[target_j["id"]]
+        now_mono = monotonic()
+        remaining_red_s = HARM_CONFIG["REMAINING_RED_ESTIMATE_S"]
+        # Estimate conflicting-arm red exposure through queue clearance/arrival, capped by the hard hold.
+        extra_red_s = min(HARM_CONFIG["MAX_PREEMPT_HOLD_S"], max(t_flush_high, eta_sec, 0.0))
+        cross_arms = [
+            {"arm": other_arm,
+             "queue_pcu": queue_estimate["pcu_total"] * HARM_CONFIG["CROSS_ARM_QUEUE_SHARE"],
+             "arrival_rate_pcu_per_s": HARM_CONFIG["ARRIVAL_RATE_PCU_PER_S_PER_ARM"]}
+            for other_arm in JUNCTION_ARM_BEARINGS[junction_id] if other_arm != arm
+        ]
+        harm_decision = calculate_delay_harm(remaining_red_s, t_flush_high, cross_arms, extra_red_s)
+        arm_starvation = {
+            other_arm: now_mono - harm_state["arm_last_served_at"][other_arm]
+            for other_arm in find_starved_arms(harm_state["arm_last_served_at"], now_mono, arm)
+        }
+        recovery_remaining = max(0.0, harm_state["recovery_until"] - now_mono)
+        last_preemption = harm_state["last_preemption_at"]
+        cooldown_remaining = max(0.0, HARM_CONFIG["COOLDOWN_S"] - (now_mono - last_preemption)) if last_preemption else 0.0
+        cooldown_allowed = cooldown_allows(last_preemption, now_mono, harm_state["last_vehicle_id"],
+                                           vehicle_id, approaching, harm_decision["delay_saved_s"])
+        harm_state["last_decision"] = harm_decision
+
+        if not harm_decision["granted_by_harm_check"]:
+            reason = harm_decision["decision_reason"]
+            _append_audit_locked("denied", f"{reason}; delay_without={harm_decision['ambulance_delay_without_s']:.1f}s; delay_with={harm_decision['ambulance_delay_with_s']:.1f}s; saved={harm_decision['delay_saved_s']:.1f}s; cross_delay={harm_decision['cross_delay_added_vehicle_s']:.1f} vehicle-s; benefit={harm_decision['benefit_vehicle_s']:.1f}; required={harm_decision['required_benefit_vehicle_s']:.1f}", vehicle_id, junction_id)
+            return jsonify({"ok": False, "decision": "DENIED", "reason": reason, "harm": harm_decision}), 409
+
+        # Preserve competing verified requests while another junction/arm has the preemption green.
+        active_junction = next((item for item in junctions if item["signal_state"] == "PREEMPT_GREEN"), None)
+        clearance_junction = next((item for item in junctions if item["signal_state"] in ("AMBER_CLEARANCE", "ALL_RED_CLEARANCE")), None)
+        pending_junction = next((item for item in junctions if controller_runtime[item["id"]]["transition_token"] is not None), None)
+        queued_request = {"vehicle_id": vehicle_id, "junction_id": junction_id, "arm": arm,
+                          "eta_s": eta_sec, "queued_at": now_mono}
+        if active_junction or clearance_junction or pending_junction or not can_grant_without_conflict([item["signal_state"] for item in junctions]):
+            existing = next((item for item in preemption_request_queue if item["vehicle_id"] == vehicle_id), None)
+            if existing:
+                existing.update(queued_request)
+            else:
+                preemption_request_queue.append(queued_request)
+            preemption_request_queue.sort(key=lambda item: (item["eta_s"], item["queued_at"]))
+            active_context = harm_runtime[active_junction["id"]].get("active") if active_junction else {}
+            active_hold = max(0.0, (active_context or {}).get("hold_deadline", now_mono) - now_mono)
+            retry_after = active_hold + PREEMPT_RELEASE_AMBER_SECONDS + PREEMPT_RELEASE_ALL_RED_SECONDS
+            blocker = active_junction or clearance_junction or pending_junction
+            if pending_junction and not active_junction and not clearance_junction:
+                runtime = controller_runtime[pending_junction["id"]]
+                elapsed = monotonic() - runtime["phase_since"]
+                phase_wait = (max(0.0, SAFETY_CONFIG["MIN_GREEN_S"] - elapsed)
+                              if pending_junction["signal_state"] == "GREEN"
+                              else max(0.0, SAFETY_CONFIG["ALL_RED_S"] - elapsed))
+                retry_after = phase_wait + SAFETY_CONFIG["AMBER_S"] + SAFETY_CONFIG["ALL_RED_S"]
+            reason = (f"Queued behind active ambulance {(active_context or {}).get('vehicle_id', 'request')}"
+                      if active_junction else f"Queued during {blocker['signal_state']} clearance")
+            reason += "; requests are ordered by verified ETA"
+            harm_decision["decision_reason"] = reason
+            _append_audit_locked("queued", f"{reason}; ETA={eta_sec:.1f}s; delay_saved={harm_decision['delay_saved_s']:.1f}s; cross_delay={harm_decision['cross_delay_added_vehicle_s']:.1f} vehicle-s; benefit={harm_decision['benefit_vehicle_s']:.1f}; harm={harm_decision['required_benefit_vehicle_s']:.1f}", vehicle_id, junction_id)
+            return jsonify({"ok": True, "decision": "QUEUED", "reason": reason, "harm": harm_decision,
+                            "retry_after_s": round(max(1.0, retry_after), 1),
+                            "queue": preemption_request_queue}), 200
+
+        if arm_starvation:
+            reason = "Starved arm blocks preemption: " + ", ".join(sorted(arm_starvation))
+            harm_decision["decision_reason"] = reason
+            _append_audit_locked("denied", f"{reason}; delay_saved={harm_decision['delay_saved_s']:.1f}s; cross_delay={harm_decision['cross_delay_added_vehicle_s']:.1f} vehicle-s; benefit={harm_decision['benefit_vehicle_s']:.1f}; harm={harm_decision['required_benefit_vehicle_s']:.1f}", vehicle_id, junction_id)
+            return jsonify({"ok": False, "decision": "DENIED", "reason": reason, "harm": harm_decision,
+                            "starved_arms": arm_starvation}), 409
+        if recovery_remaining > 0:
+            queued = next((item for item in preemption_request_queue if item["vehicle_id"] == vehicle_id), None)
+            if queued:
+                queued.update(queued_request)
+                queued["queued_at"] = now_mono
+                preemption_request_queue.sort(key=lambda item: (item["eta_s"], item["queued_at"]))
+                reason = f"Queued until cross-traffic recovery greens finish ({recovery_remaining:.1f}s remaining)"
+                harm_decision["decision_reason"] = reason
+                _append_audit_locked("queued", f"{reason}; saved={harm_decision['delay_saved_s']:.1f}s; cross_delay={harm_decision['cross_delay_added_vehicle_s']:.1f} vehicle-s", vehicle_id, junction_id)
+                return jsonify({"ok": True, "decision": "QUEUED", "reason": reason, "harm": harm_decision,
+                                "retry_after_s": round(max(1.0, recovery_remaining), 1),
+                                "queue": preemption_request_queue}), 200
+            reason = f"Recovery greens still required for cross traffic ({recovery_remaining:.1f}s remaining)"
+            harm_decision["decision_reason"] = reason
+            _append_audit_locked("denied", f"{reason}; delay_saved={harm_decision['delay_saved_s']:.1f}s; cross_delay={harm_decision['cross_delay_added_vehicle_s']:.1f} vehicle-s", vehicle_id, junction_id)
+            return jsonify({"ok": False, "decision": "DENIED", "reason": reason, "harm": harm_decision}), 409
+        if cooldown_remaining > 0 and not cooldown_allowed:
+            reason = f"Junction cooldown active ({cooldown_remaining:.1f}s remaining)"
+            harm_decision["decision_reason"] = reason
+            _append_audit_locked("denied", f"{reason}; delay_saved={harm_decision['delay_saved_s']:.1f}s; cross_delay={harm_decision['cross_delay_added_vehicle_s']:.1f} vehicle-s", vehicle_id, junction_id)
+            return jsonify({"ok": False, "decision": "DENIED", "reason": reason, "harm": harm_decision}), 409
+        if not harm_decision["granted_by_harm_check"]:
+            reason = harm_decision["decision_reason"]
+            harm_state["last_decision"] = harm_decision
+            _append_audit_locked("denied", f"{reason}; delay_without={harm_decision['ambulance_delay_without_s']:.1f}s; delay_with={harm_decision['ambulance_delay_with_s']:.1f}s; saved={harm_decision['delay_saved_s']:.1f}s; cross_delay={harm_decision['cross_delay_added_vehicle_s']:.1f} vehicle-s; benefit={harm_decision['benefit_vehicle_s']:.1f}; required={harm_decision['required_benefit_vehicle_s']:.1f}", vehicle_id, junction_id)
+            return jsonify({"ok": False, "decision": "DENIED", "reason": reason, "harm": harm_decision}), 409
+
+        if preemption_request_queue:
+            existing = next((item for item in preemption_request_queue if item["vehicle_id"] == vehicle_id), None)
+            if existing:
+                existing.update(queued_request)
+            else:
+                preemption_request_queue.append(queued_request)
+            preemption_request_queue.sort(key=lambda item: (item["eta_s"], item["queued_at"]))
+            next_request = choose_earliest_ambulance(preemption_request_queue)
+            if next_request and next_request["vehicle_id"] != vehicle_id:
+                reason = f"Waiting for nearer queued ambulance {next_request['vehicle_id']} (ETA {next_request['eta_s']:.1f}s)"
+                harm_decision["decision_reason"] = reason
+                _append_audit_locked("queued", f"{reason}; this ETA={eta_sec:.1f}s; saved={harm_decision['delay_saved_s']:.1f}s; cross_delay={harm_decision['cross_delay_added_vehicle_s']:.1f} vehicle-s", vehicle_id, junction_id)
+                return jsonify({"ok": True, "decision": "QUEUED", "reason": reason, "harm": harm_decision,
+                                "queue": preemption_request_queue}), 200
+            preemption_request_queue[:] = [item for item in preemption_request_queue if item["vehicle_id"] != vehicle_id]
+
+        controller_state = controller_runtime[junction_id]
+        if not should_apply_recommendation(controller_state["mode"], False):
+            phase_state = controller_state
+            phase = target_j["signal_state"]
+            phase_elapsed = monotonic() - phase_state["phase_since"]
+            interlock_wait = (max(0.0, SAFETY_CONFIG["MIN_GREEN_S"] - phase_elapsed) if phase in ("GREEN", "PREEMPT_GREEN")
+                              else max(0.0, SAFETY_CONFIG["ALL_RED_S"] - phase_elapsed))
+            start_in = max(0.0, green_start_in) + interlock_wait + SAFETY_CONFIG["AMBER_S"] + SAFETY_CONFIG["ALL_RED_S"]
+            recommendation_id = secrets.token_urlsafe(12)
+            recommendation = {
+                "id": recommendation_id,
+                "junction_id": junction_id,
+                "arm": arm,
+                "start_in_s": round(start_in, 1),
+                "reason": f"Recommend: green for arm {arm} in {start_in:.1f} s",
+                "vehicle_id": vehicle_id,
+                "eta_s": round(eta_sec, 1),
+                "t_flush_high_s": round(t_flush_high, 1),
+                "harm": harm_decision,
+                "created_at": monotonic(),
+                "expires_at": monotonic() + SAFETY_CONFIG["RECOMMENDATION_TTL_S"],
+                "expires_in_s": SAFETY_CONFIG["RECOMMENDATION_TTL_S"]
+            }
+            controller_state["recommendation"] = recommendation
+            controller_state["interlock_status"] = "Advisory only: no signal phase changed"
+            _append_audit_locked("recommendation_created", f"{recommendation['reason']}; ETA={eta_sec:.1f}s; T_flush_high={t_flush_high:.1f}s; delay_saved={harm_decision['delay_saved_s']:.1f}s; cross_delay={harm_decision['cross_delay_added_vehicle_s']:.1f} vehicle-s; benefit={harm_decision['benefit_vehicle_s']:.1f}; harm={harm_decision['required_benefit_vehicle_s']:.1f}", vehicle_id, junction_id)
+            expiry_timer = Timer(SAFETY_CONFIG["RECOMMENDATION_TTL_S"], _expire_recommendation, args=(junction_id, recommendation_id))
+            expiry_timer.daemon = True
+            expiry_timer.start()
+            return jsonify({"ok": True, "decision": "RECOMMENDED", "reason": recommendation["reason"],
+                            "recommendation": recommendation, "harm": harm_decision,
+                            "eta_s": round(eta_sec, 1), "t_flush_high_sec": round(t_flush_high, 1)}), 200
+
         # Update target junction
         target_j["cars"] = cars
         target_j["trucks"] = trucks
         target_j["bikes"] = bikes
         target_j["queue_estimate"] = queue_estimate
-        target_j["signal_state"] = "PREEMPT_GREEN"
         target_j["t_flush_sec"] = round(t_flush, 1)
         target_j["t_flush_low_sec"] = round(queue_estimate["low_sec"], 1)
         target_j["t_flush_high_sec"] = round(t_flush_high, 1)
@@ -949,25 +2027,44 @@ def trigger_preempt():
         if downstream_j:
             if previous_downstream_state is None:
                 previous_downstream_state = downstream_j["signal_state"]
-            downstream_j["signal_state"] = "GREEN_WAVE_STANDBY"
+            controller_adapter.set_corridor_status(downstream_j, "GREEN_WAVE_STANDBY")
+        hold_token = object()
+        cross_arm_ids = [item["arm"] for item in cross_arms]
         preemption_release_sequences[target_j["id"]] = {
             "previous_target_state": previous_target_state,
             "downstream_id": downstream_j["id"] if downstream_j else None,
-            "previous_downstream_state": previous_downstream_state
+            "previous_downstream_state": previous_downstream_state,
+            "hold_token": hold_token,
+            "vehicle_id": vehicle_id,
+            "arm": arm,
+            "eta_s": eta_sec,
+            "cross_arms": cross_arm_ids,
+            "harm": harm_decision,
+            "sec_saved": round(t_flush + 42),
+            "fuel_saved": round((cars * 0.08 + trucks * 0.25), 2),
+            "t_flush_sec": round(t_flush, 1)
         }
+        harm_state["last_decision"] = harm_decision
+
+        accepted, interlock_reason = controller_adapter.request_phase_locked(
+            target_j, arm, "Approved vehicle token, verified approaching siren, and minimum-harm gate")
+        if not accepted:
+            preemption_release_sequences.pop(target_j["id"], None)
+            harm_state["active"] = None
+            harm_decision["decision_reason"] = interlock_reason
+            _append_audit_locked("interlock_blocked", interlock_reason, vehicle_id, junction_id)
+            return jsonify({"ok": False, "decision": "DENIED", "reason": interlock_reason,
+                            "harm": harm_decision}), 409
 
         # Update S2 Impact Metrics
         sec_saved = round(t_flush + 42)
         fuel_saved = round((cars * 0.08 + trucks * 0.25), 2)
-        impact_metrics["golden_hour_sec_saved"] += sec_saved
-        impact_metrics["fuel_litres_saved"] = round(impact_metrics["fuel_litres_saved"] + fuel_saved, 2)
-        impact_metrics["active_green_waves"] += 1
 
         # Insert high-priority incident log
         gw_incident = {
             "id": f"GW-{len(incidents) + 101}",
             "type": "Accident",
-            "title": f"Emergency Green Wave Active — Queue Discharge T={round(t_flush, 1)}s",
+            "title": f"Emergency Green Simulator transition pending — Queue Discharge T={round(t_flush, 1)}s",
             "road": f"NH-206 · {target_j['name']}",
             "area": target_j['name'].split("(")[0].strip(),
             "lat": target_j.get("lat", 13.312),
@@ -977,18 +2074,22 @@ def trigger_preempt():
             "reported": india_now().strftime("%I:%M:%S %p"),
             "status": "In progress",
             "delay": 0,
-            "detail": f"Emergency preemption corridor engaged. ETA: {round(eta_sec, 1)}s ({round(ambulance_dist_m)}m @ {round(ambulance_speed_kmh)} km/h). Siren event: {siren_label} ({'confirmed' if siren_confirmed else 'manual'}), confidence: {round(siren_confidence * 100)}%.",
+            "detail": f"Simulator request pending safe phase interlock. ETA: {round(eta_sec, 1)}s ({round(ambulance_dist_m)}m @ {round(ambulance_speed_kmh)} km/h). Siren event: {siren_label}, confidence: {round(siren_confidence * 100)}%.",
             "detour": "Clear emergency priority corridor. All conflicting approaches held on RED.",
             "impact": "High",
             "corridor": "nh206"
         }
         incidents.insert(0, gw_incident)
-        _append_audit_locked("granted", "Approved vehicle token and local confirmed approaching siren agree", vehicle_id, junction_id)
+        preemption_release_sequences[target_j["id"]]["incident"] = gw_incident
+        if target_j["signal_state"] == "PREEMPT_GREEN":
+            gw_incident["title"] = f"Emergency Green Wave Active — Queue Discharge T={round(t_flush, 1)}s"
+            gw_incident["detail"] = "Simulator phase is active after interlocked minimum-green, amber, and all-red sequence."
+        _append_audit_locked("controller_request", f"Simulation phase request accepted; {interlock_reason}; {harm_decision['decision_reason']}; delay_without={harm_decision['ambulance_delay_without_s']:.1f}s; delay_with={harm_decision['ambulance_delay_with_s']:.1f}s; saved={harm_decision['delay_saved_s']:.1f}s; cross_delay={harm_decision['cross_delay_added_vehicle_s']:.1f} vehicle-s; benefit={harm_decision['benefit_vehicle_s']:.1f}; required={harm_decision['required_benefit_vehicle_s']:.1f}", vehicle_id, junction_id)
 
     return jsonify({
         "ok": True,
-        "decision": "GRANTED",
-        "reason": "Approved signed vehicle, verified approaching position, arm, and close-range siren agree",
+        "decision": "APPLYING",
+        "reason": f"SIMULATION ONLY: {interlock_reason}. No real controller is connected.",
         "vehicle_id": vehicle_id,
         "junction_id": target_j["id"],
         "junction_name": target_j["name"],
@@ -998,6 +2099,9 @@ def trigger_preempt():
         "pcu_total": round(queue_estimate["pcu_total"], 2),
         "effective_lanes": lanes,
         "green_start_in": round(green_start_in, 2),
+        "harm": harm_decision,
+        "max_hold_s": HARM_CONFIG["MAX_PREEMPT_HOLD_S"],
+        "hold_remaining_s": HARM_CONFIG["MAX_PREEMPT_HOLD_S"],
         "eta_sec": round(eta_sec, 2),
         "speed_mps": round(speed_mps, 2),
         "ambulance_dist_m": ambulance_dist_m,
@@ -1013,7 +2117,7 @@ def trigger_preempt():
         "eta_s": eta_s,
         "formula": "t_react + t_startup + (cars*PCU_car + trucks*PCU_heavy + bikes*PCU_two_wheeler + auto_rickshaws*PCU_auto) * h / effective_lanes",
         "queue_breakdown": queue_estimate,
-        "target_signal_state": "PREEMPT_GREEN",
+        "target_signal_state": "TRANSITIONING THROUGH INTERLOCK",
         "downstream_junction_id": downstream_j["id"] if downstream_j else None,
         "downstream_signal_state": "GREEN_WAVE_STANDBY" if downstream_j else None,
         "impact_increment": {
@@ -1026,7 +2130,7 @@ def trigger_preempt():
 
 @app.post("/api/preempt/release")
 def release_preempt():
-    """Demo release sequence: amber, all-red, then restore the saved normal states."""
+    """Release through the controller adapter and the same safety interlock."""
     payload = request.get_json(silent=True) or {}
     junction_id = payload.get("junction_id", "J1")
     with lock:
@@ -1035,47 +2139,18 @@ def release_preempt():
             return jsonify({"ok": False, "error": "Unknown junction"}), 404
         if target["signal_state"] != "PREEMPT_GREEN":
             return jsonify({"ok": False, "error": "No active preemption to release"}), 409
-        context = preemption_release_sequences.get(junction_id, {})
-        token = object()
-        context["token"] = token
-        preemption_release_sequences[junction_id] = context
-        target["signal_state"] = "AMBER_CLEARANCE"
-        downstream = next((j for j in junctions if j["id"] == context.get("downstream_id")), None)
-        if downstream and downstream["signal_state"] == "GREEN_WAVE_STANDBY":
-            downstream["signal_state"] = "AMBER_CLEARANCE"
-
-    def enter_all_red():
+    accepted, reason = controller_adapter.release(target, "preemption release request")
+    if not accepted:
         with lock:
-            if preemption_release_sequences.get(junction_id, {}).get("token") is not token:
-                return
-            target["signal_state"] = "ALL_RED_CLEARANCE"
-            if downstream:
-                downstream["signal_state"] = "ALL_RED_CLEARANCE"
-        finish_timer = Timer(PREEMPT_RELEASE_ALL_RED_SECONDS, restore_normal_states)
-        finish_timer.daemon = True
-        finish_timer.start()
-
-    def restore_normal_states():
-        with lock:
-            release = preemption_release_sequences.get(junction_id)
-            if not release or release.get("token") is not token:
-                return
-            target["signal_state"] = release.get("previous_target_state", "RED")
-            if downstream:
-                downstream["signal_state"] = release.get("previous_downstream_state", "RED")
-            preemption_release_sequences.pop(junction_id, None)
-            impact_metrics["active_green_waves"] = max(0, impact_metrics["active_green_waves"] - 1)
-
-    amber_timer = Timer(PREEMPT_RELEASE_AMBER_SECONDS, enter_all_red)
-    amber_timer.daemon = True
-    amber_timer.start()
+            _append_audit_locked("interlock_blocked", reason, None, junction_id)
+        return jsonify({"ok": False, "error": reason}), 409
     return jsonify({
         "ok": True,
         "stage": "amber_clearance",
         "next_stage": "all_red_clearance",
         "amber_seconds": PREEMPT_RELEASE_AMBER_SECONDS,
         "all_red_seconds": PREEMPT_RELEASE_ALL_RED_SECONDS,
-        "message": "Amber then all-red clearance will complete before the saved normal states resume."
+        "message": reason
     })
 
 

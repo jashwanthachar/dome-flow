@@ -90,6 +90,54 @@ function runQueueModelSelfCheck() {
 
 window.runQueueModelSelfCheck = runQueueModelSelfCheck;
 
+async function runHarmSelfCheck() {
+  console.group("Minimum-harm / preemption safety self-check");
+  try {
+    const response = await api("/api/dev/harm-self-check");
+    let passedAll = true;
+    for (const item of response.results || []) {
+      passedAll = passedAll && item.passed;
+      console[item.passed ? "log" : "error"](`${item.passed ? "PASS" : "FAIL"} ${item.name}: expected ${JSON.stringify(item.expected)}, actual ${JSON.stringify(item.actual)}`);
+    }
+    console.log(passedAll ? "All harm self-checks passed" : "One or more harm self-checks failed");
+    if ($("#dual-key-status")) $("#dual-key-status").textContent = passedAll
+      ? "Minimum-harm self-check passed. See console."
+      : "Minimum-harm self-check failed. See console.";
+    await load();
+    return passedAll;
+  } catch (error) {
+    console.error("FAIL minimum-harm self-check", error);
+    if ($("#dual-key-status")) $("#dual-key-status").textContent = "Minimum-harm self-check could not run: " + error.message;
+    return false;
+  } finally {
+    console.groupEnd();
+  }
+}
+window.runHarmSelfCheck = runHarmSelfCheck;
+
+async function runControllerSelfCheck() {
+  console.group("Controller adapter and safety interlock self-check");
+  try {
+    const response = await api("/api/dev/controller-self-check");
+    let allPassed = true;
+    for (const item of response.results || []) {
+      allPassed = allPassed && item.passed;
+      console[item.passed ? "log" : "error"](`${item.passed ? "PASS" : "FAIL"} ${item.name}: expected ${JSON.stringify(item.expected)}, actual ${JSON.stringify(item.actual)}`);
+    }
+    console.log(allPassed ? "All controller safety checks passed" : "Controller safety checks failed");
+    if ($("#dual-key-status")) $("#dual-key-status").textContent = allPassed
+      ? "Controller safety self-check passed. See console."
+      : "Controller safety self-check failed. See console.";
+    return allPassed;
+  } catch (error) {
+    console.error("FAIL controller self-check", error);
+    return false;
+  } finally {
+    console.groupEnd();
+  }
+}
+window.runControllerSelfCheck = runControllerSelfCheck;
+
 let latestVerifiedVehicleReports = {};
 
 // Approach bearings are provisional compass headings toward each junction; field-check each arm.
@@ -249,6 +297,32 @@ function renderAll() {
 function renderSummary(data) {
   if (!data) return;
 
+  const controllerStatus = data.controller_status || {};
+  const modes = [...new Set((data.junctions || []).map(j => j.controller_mode || "ADVISORY"))];
+  if ($("#controller-mode-status")) $("#controller-mode-status").textContent = modes.join(" / ") + " · decision/act boundary";
+  if ($("#controller-failsafe-badge")) {
+    const failSafe = !!controllerStatus.fail_safe_active;
+    $("#controller-failsafe-badge").textContent = failSafe ? "FAIL-SAFE ACTIVE" : "HEARTBEATS HEALTHY";
+    $("#controller-failsafe-badge").classList.toggle("active", failSafe);
+  }
+  if ($("#controller-failsafe-reason")) $("#controller-failsafe-reason").textContent = controllerStatus.fail_safe_reason || "Heartbeat status unavailable";
+  if ($("#controller-interlock-status")) {
+    const blocked = (data.junctions || []).find(j => (j.interlock_status || "").startsWith("Blocked"));
+    $("#controller-interlock-status").textContent = blocked
+      ? `${blocked.id}: ${blocked.interlock_status}`
+      : `Interlock: ${(data.junctions || []).map(j => `${j.id} ${j.interlock_status || "ready"}`).join(" · ")}`;
+  }
+  if ($("#controller-simulation-banner")) $("#controller-simulation-banner").textContent = controllerStatus.banner || "SIMULATION, NOT CONNECTED TO REAL SIGNALS";
+  const recommendation = (data.junctions || []).map(j => j.recommendation && ({ ...j.recommendation, mode: j.controller_mode })).find(Boolean);
+  if ($("#controller-recommendation")) {
+    $("#controller-recommendation").hidden = !recommendation;
+    if (recommendation) {
+      $("#controller-recommendation-title").textContent = recommendation.reason;
+      $("#controller-recommendation-details").textContent = `${recommendation.junction_id} · arm ${recommendation.arm} · ETA ${recommendation.eta_s}s · queue HIGH ${recommendation.t_flush_high_s}s · saved ${Number(recommendation.harm.delay_saved_s).toFixed(1)}s · cross traffic ${Number(recommendation.harm.cross_delay_added_vehicle_s).toFixed(1)} vehicle-s · benefit ${Number(recommendation.harm.benefit_vehicle_s).toFixed(1)} vs harm ${Number(recommendation.harm.required_benefit_vehicle_s).toFixed(1)} · expires in ${Math.max(0, Math.ceil(recommendation.expires_in_s))}s. Confirm only records operator review; it does not change a phase.`;
+      $("#controller-recommendation").dataset.recommendationId = recommendation.id;
+    }
+  }
+
   // 1. Corridor Breadcrumb & Map Caption
   const isNH206 = data.active_scenario === "nh206";
   if ($("#corridor-breadcrumb")) {
@@ -273,24 +347,47 @@ function renderSummary(data) {
   // 3. 4-Junction Grid Rendering
   if ($("#junctions-grid") && data.junctions) {
     $("#junctions-grid").innerHTML = data.junctions.map(j => {
+      const displaySignalState = j.display_status || j.signal_state;
+      const harm = j.harm_status || {};
+      const benefit = Number(harm.benefit_vehicle_s || 0);
+      const harmCost = Number(harm.required_benefit_vehicle_s || 0);
+      const balanceWidth = benefit + harmCost > 0 ? Math.round(benefit / (benefit + harmCost) * 100) : 0;
+      const queueText = (harm.queued_requests || []).length
+        ? harm.queued_requests.map(item => `${esc(item.vehicle_id)} (${Number(item.eta_s).toFixed(1)}s)`).join(" → ")
+        : "None";
       let sigClass = "red";
-      if (j.signal_state === "PREEMPT_GREEN") sigClass = "preempt-green";
-      else if (j.signal_state === "GREEN_WAVE_STANDBY") sigClass = "standby";
-      else if (j.signal_state === "GREEN") sigClass = "green";
-      else if (j.signal_state === "AMBER_CLEARANCE") sigClass = "amber-clearance";
+      if (displaySignalState === "PREEMPT_GREEN") sigClass = "preempt-green";
+      else if (displaySignalState === "GREEN_WAVE_STANDBY") sigClass = "standby";
+      else if (displaySignalState === "GREEN") sigClass = "green";
+      else if (displaySignalState === "AMBER_CLEARANCE") sigClass = "amber-clearance";
 
       return `
         <div class="junction-card glass" data-junction="${esc(j.id)}">
           <div class="junction-header">
             <div class="j-info"><b class="j-id">${esc(j.id)}</b> · <span class="j-name">${esc(j.name)}</span></div>
-            <span class="signal-badge ${sigClass}">${esc(j.signal_state)}</span>
+            <span class="signal-badge ${sigClass}">${esc(displaySignalState)}</span>
           </div>
+          <span class="controller-mode-badge">${esc(j.controller_mode || "ADVISORY")}</span>
+          <label class="controller-mode-control">Controller mode <select data-controller-mode data-junction="${esc(j.id)}">
+            <option value="ADVISORY" ${j.controller_mode !== "DEMO_AUTO" ? "selected" : ""}>ADVISORY</option>
+            <option value="DEMO_AUTO" ${j.controller_mode === "DEMO_AUTO" ? "selected" : ""}>DEMO_AUTO</option>
+          </select></label>
+          <small class="junction-interlock">${esc(j.interlock_status || "Interlock ready")}</small>
           <div class="junction-queues">
             <span title="Queued Cars">🚗 <b class="q-cars">${j.cars}</b></span>
             <span title="Queued Trucks">🚚 <b class="q-trucks">${j.trucks}</b></span>
             <span title="Queued Bikes">🛵 <b class="q-bikes">${j.bikes}</b></span>
           </div>
           <div class="junction-flush"><small>QUEUE DISCHARGE (saturation flow)</small> T_flush: <strong class="q-flush">${j.t_flush_sec}s</strong> <small class="q-flush-range">${j.t_flush_low_sec}–${j.t_flush_high_sec}s</small></div>
+          <div class="harm-readout">
+            <div><span>Ambulance delay saved</span><b>${Number(harm.delay_saved_s || 0).toFixed(1)}s</b></div>
+            <div><span>Cross-traffic delay added</span><b>${Number(harm.cross_delay_added_vehicle_s || 0).toFixed(1)} vehicle-s</b></div>
+            <div class="harm-balance-label"><span>Benefit ${benefit.toFixed(1)} vs harm ${harmCost.toFixed(1)}</span><span>${balanceWidth}%</span></div>
+            <div class="harm-balance"><i style="width:${balanceWidth}%"></i></div>
+            <small>Hold <b class="harm-countdown" data-seconds="${Number(harm.hold_remaining_s || 0)}">${Math.ceil(Number(harm.hold_remaining_s || 0))}s</b> / ${Number(harm.max_hold_s || 40)}s · Cooldown <b class="harm-countdown" data-seconds="${Number(harm.cooldown_remaining_s || 0)}">${Math.ceil(Number(harm.cooldown_remaining_s || 0))}s</b> · Recovery <b class="harm-countdown" data-seconds="${Number(harm.recovery_remaining_s || 0)}">${Math.ceil(Number(harm.recovery_remaining_s || 0))}s</b></small>
+            <small>Decision: ${esc(harm.reason || "No preemption decision yet")}</small>
+            <small>ETA priority queue: ${queueText}</small>
+          </div>
         </div>
       `;
     }).join("");
@@ -342,6 +439,56 @@ async function load() {
     console.error("Load error:", e);
     toast("Could not load demo data. Is the Flask server running?");
   }
+}
+
+async function controllerHeartbeat(source) {
+  try {
+    await api("/api/controller/heartbeat", { method: "POST", body: JSON.stringify({ source }) });
+  } catch (error) {
+    console.warn(`Controller ${source} heartbeat failed:`, error.message);
+  }
+}
+
+async function updateControllerMode(junctionId, mode) {
+  try {
+    const result = await api("/api/controller/mode", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Admin-Token": $("#admin-token")?.value || "" },
+      body: JSON.stringify({ junction_id: junctionId, mode })
+    });
+    if ($("#dual-key-status")) $("#dual-key-status").textContent = `${junctionId} mode set to ${result.mode}.`;
+  } catch (error) {
+    if ($("#dual-key-status")) $("#dual-key-status").textContent = `Mode change rejected: ${error.message}`;
+  }
+  await load();
+}
+
+async function handleRecommendation(action) {
+  const panel = $("#controller-recommendation");
+  const id = panel?.dataset.recommendationId;
+  if (!id) return;
+  try {
+    const result = await api(`/api/controller/recommendation/${encodeURIComponent(id)}/${action}`, {
+      method: "POST", body: JSON.stringify({})
+    });
+    if ($("#dual-key-status")) $("#dual-key-status").textContent = result.reason || `Recommendation ${action}ed; no phase changed.`;
+  } catch (error) {
+    if ($("#dual-key-status")) $("#dual-key-status").textContent = `Recommendation ${action} failed: ${error.message}`;
+  }
+  await load();
+}
+
+async function requestManualOverride() {
+  const junctionId = $("#preempt-junction")?.value || "J1";
+  try {
+    const result = await api("/api/controller/override", {
+      method: "POST", body: JSON.stringify({ junction_id: junctionId })
+    });
+    if ($("#dual-key-status")) $("#dual-key-status").textContent = result.reason;
+  } catch (error) {
+    if ($("#dual-key-status")) $("#dual-key-status").textContent = `Manual override blocked: ${error.message}`;
+  }
+  await load();
 }
 
 async function updateStatus(id, status) {
@@ -801,6 +948,7 @@ async function triggerPreemptionOverride(sirenEvent) {
 
   preemptionRequestPending = true;
   try {
+    const unit_event_id = await postSignedAcousticEvent(event, junction_id);
     const res = await api("/api/preempt/trigger", {
       method: "POST",
       body: JSON.stringify({
@@ -811,6 +959,7 @@ async function triggerPreemptionOverride(sirenEvent) {
         ...(vehicle_id ? { vehicle_id } : {}),
         siren_confidence,
         siren_confirmed: !!event.confirmed,
+        unit_event_id,
         siren_label: event.label || "none",
         stage: event.stage,
         approach: event.approach,
@@ -818,11 +967,16 @@ async function triggerPreemptionOverride(sirenEvent) {
       })
     });
 
-    if (res.decision === "WAIT") {
+    if (res.decision === "WAIT" || res.decision === "QUEUED") {
       preemptionScheduled = true;
       const scheduledVehicle = vehicle_id;
-      const delayMs = Math.max(250, (res.green_start_in - QUEUE_CONFIG.GREEN_START_EARLY_BUFFER_S) * 1000);
-      if ($("#dual-key-status")) $("#dual-key-status").textContent = "Queue discharge timing: " + res.reason;
+      const delayMs = res.decision === "WAIT"
+        ? Math.max(250, (res.green_start_in - QUEUE_CONFIG.GREEN_START_EARLY_BUFFER_S) * 1000)
+        : Math.max(1000, Number(res.retry_after_s || 2) * 1000);
+      if ($("#dual-key-status")) $("#dual-key-status").textContent = res.decision === "QUEUED"
+        ? "Ambulance queued by verified ETA: " + res.reason
+        : "Queue discharge timing: " + res.reason;
+      if (res.decision === "QUEUED") await load();
       setTimeout(() => {
         preemptionScheduled = false;
         const detectorStillConfirmed = sirenDetector.state === "CONFIRMED" && directionAnalysis.state === "APPROACHING" &&
@@ -837,6 +991,15 @@ async function triggerPreemptionOverride(sirenEvent) {
       const gwEl = $("#svg-green-wave-corridor");
       if (gwEl) gwEl.classList.add("active");
       toast(`🚑 Emergency Green Wave Active! Queue Discharge T=${res.t_flush_sec}s (high ${res.t_flush_high_sec}s)`);
+    } else if (res.decision === "RECOMMENDED") {
+      if ($("#dual-key-status")) $("#dual-key-status").textContent = `${res.reason}. Advisory only; no phase changed.`;
+      await load();
+      toast("Advisory recommendation created. No signal phase changed.");
+    } else if (res.decision === "APPLYING") {
+      preemptionScheduled = false;
+      if ($("#dual-key-status")) $("#dual-key-status").textContent = res.reason;
+      await load();
+      toast("Simulator is applying the interlocked phase sequence; no real controller is connected.");
     } else {
       if ($("#dual-key-status")) $("#dual-key-status").textContent = `${res.decision}: ${res.reason}`;
       toast(`${res.decision}: ${res.reason}`);
@@ -1380,6 +1543,62 @@ function bytesToBase64(bytes) {
   return btoa(binary);
 }
 
+const unitDbName = "dome-flow-junction-unit-keys";
+let junctionUnitDb;
+function openJunctionUnitDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(unitDbName, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("units", { keyPath: "junction_id" });
+    request.onsuccess = () => { junctionUnitDb = request.result; resolve(request.result); };
+    request.onerror = () => reject(request.error);
+  });
+}
+function readJunctionKey(junctionId) {
+  return new Promise((resolve, reject) => {
+    const request = junctionUnitDb.transaction("units").objectStore("units").get(junctionId);
+    request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+  });
+}
+function saveJunctionKey(record) {
+  return new Promise((resolve, reject) => {
+    const tx = junctionUnitDb.transaction("units", "readwrite"); tx.objectStore("units").put(record);
+    tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+  });
+}
+const canonicalSignedJson = data => JSON.stringify(Object.fromEntries(Object.keys(data).sort().map(key => [key, data[key]])));
+const randomNonce = () => bytesToBase64(crypto.getRandomValues(new Uint8Array(18))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+async function enrollJunctionUnit(junctionId) {
+  if (!junctionUnitDb) await openJunctionUnitDb();
+  let keyRecord = await readJunctionKey(junctionId);
+  if (!keyRecord) {
+    const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
+    keyRecord = { junction_id: junctionId, unit_id: `demo-unit-${junctionId}`, privateKey: pair.privateKey, publicKey: pair.publicKey };
+    await saveJunctionKey(keyRecord);
+  }
+  const publicKey = bytesToBase64(await crypto.subtle.exportKey("spki", keyRecord.publicKey));
+  const enrollment = await api("/api/unit/enroll", { method: "POST", body: JSON.stringify({ unit_id: keyRecord.unit_id, junction_id: junctionId, public_key: publicKey }) });
+  if ($("#junction-unit-status")) $("#junction-unit-status").textContent = `${keyRecord.unit_id}: ${enrollment.status}. Admin approval is required.`;
+  await refreshDualKeyData();
+  return keyRecord;
+}
+
+async function postSignedAcousticEvent(event, junctionId) {
+  const keyRecord = await enrollJunctionUnit(junctionId);
+  const payload = {
+    unit_id: keyRecord.unit_id, junction_id: junctionId,
+    timestamp: Math.floor(Date.now() / 1000), nonce: randomNonce(),
+    label: event.label, confidence: Number(event.confidence) || 0,
+    approach: directionAnalysis.state.toLowerCase(),
+    slope: Number(directionAnalysis.slopeDbS.toFixed(2)),
+    r_squared: Number(directionAnalysis.rSquared.toFixed(4))
+  };
+  const signature = bytesToBase64(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, keyRecord.privateKey,
+    new TextEncoder().encode(canonicalSignedJson(payload))));
+  const result = await api("/api/unit/event", { method: "POST", body: JSON.stringify({ ...payload, signature }) });
+  return result.event_id;
+}
+
 function pointAtDistance(distanceM, headingDeg) {
   const radius = 6371000, lat1 = 13.3110 * Math.PI / 180, lon1 = 76.9410 * Math.PI / 180;
   const bearing = ((headingDeg + 180) % 360) * Math.PI / 180, delta = distanceM / radius;
@@ -1408,6 +1627,26 @@ async function signedAttackReport(fixture, distanceM, heading = 10, speed = 55, 
   return { ...payload, signature };
 }
 
+async function createAttackUnit(unitId, junctionId, status = "approved") {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
+  const public_key = bytesToBase64(await crypto.subtle.exportKey("spki", pair.publicKey));
+  const enrolled = await attackPost("/api/unit/enroll", { unit_id: unitId, junction_id: junctionId, public_key });
+  if (!enrolled.ok) throw Error(enrolled.reason);
+  if (status !== "pending") {
+    const approval = await attackPost(`/api/dev/unit/${encodeURIComponent(unitId)}/status`, { status }, { "X-Admin-Token": $("#admin-token")?.value || "" });
+    if (!approval.ok) throw Error(approval.reason);
+  }
+  return { unitId, junctionId, privateKey: pair.privateKey };
+}
+
+async function signedAttackAcoustic(fixture, junctionId = fixture.junctionId) {
+  const payload = { unit_id: fixture.unitId, junction_id: junctionId, timestamp: Math.floor(Date.now() / 1000), nonce: randomNonce(),
+    label: "wail", confidence: 0.95, approach: "approaching", slope: 2.5, r_squared: 0.95 };
+  const signature = bytesToBase64(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, fixture.privateKey,
+    new TextEncoder().encode(canonicalSignedJson(payload))));
+  return { ...payload, signature };
+}
+
 async function attackPost(url, body, headers = {}) {
   const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
   const data = await response.json().catch(() => ({}));
@@ -1416,7 +1655,7 @@ async function attackPost(url, body, headers = {}) {
 
 async function runDualKeyAttack(name) {
   const selectedJunction = "J2"; // Attack fixtures are positioned relative to the demo ambulance page's J2 location.
-  const trigger = (vehicle_id, stage = "confirmed") => attackPost("/api/preempt/trigger", { junction_id: selectedJunction, vehicle_id, stage, siren_confirmed: true, siren_label: "wail", siren_confidence: 0.95, approach: "approaching", approach_conf: 0.95 });
+  const trigger = (vehicle_id, unit_event_id = null, stage = "confirmed") => attackPost("/api/preempt/trigger", { junction_id: selectedJunction, vehicle_id, stage, siren_confirmed: true, unit_event_id, cars: 0, trucks: 0, bikes: 0 });
   let result;
   if (name === "recorded") result = await trigger(null);
   else if (name === "replay") {
@@ -1434,14 +1673,38 @@ async function runDualKeyAttack(name) {
     await attackPost("/api/vehicle/report", first);
     await new Promise(resolve => setTimeout(resolve, 1100));
     result = await attackPost("/api/vehicle/report", await signedAttackReport(fixture, 5300));
+  } else if (["unknown-unit", "revoked-unit", "replay-event", "wrong-junction", "valid"].includes(name)) {
+    const fixture = await createAttackVehicle(`atk-${name.replaceAll("-", "")}-${Date.now()}`);
+    await attackPost("/api/vehicle/report", await signedAttackReport(fixture, 50, 10, 18));
+    await new Promise(resolve => setTimeout(resolve, 1050));
+    await attackPost("/api/vehicle/report", await signedAttackReport(fixture, 30, 10, 18));
+    const unit = await createAttackUnit(`unit-${name.replaceAll("-", "")}-${Date.now()}`, name === "wrong-junction" ? "J1" : selectedJunction,
+      name === "revoked-unit" ? "revoked" : "approved");
+    let signed = await signedAttackAcoustic(unit, name === "wrong-junction" ? selectedJunction : unit.junctionId);
+    if (name === "unknown-unit") {
+      unit.unitId = `missing-${Date.now()}`;
+      signed = await signedAttackAcoustic(unit);
+      result = await attackPost("/api/unit/event", signed);
+    } else if (name === "revoked-unit" || name === "wrong-junction") result = await attackPost("/api/unit/event", signed);
+    else if (name === "replay-event") {
+      await attackPost("/api/unit/event", signed); result = await attackPost("/api/unit/event", signed);
+    } else {
+      const eventResult = await attackPost("/api/unit/event", signed);
+      if (!eventResult.ok) result = eventResult;
+      else result = await trigger(fixture.vehicleId, eventResult.event_id);
+    }
   } else {
     const fixture = await createAttackVehicle(`atk-valid-${Date.now()}`);
-    await attackPost("/api/vehicle/report", await signedAttackReport(fixture, 130));
+    await attackPost("/api/vehicle/report", await signedAttackReport(fixture, 50, 10, 18));
     await new Promise(resolve => setTimeout(resolve, 1100));
-    await attackPost("/api/vehicle/report", await signedAttackReport(fixture, 100));
+    await attackPost("/api/vehicle/report", await signedAttackReport(fixture, 30, 10, 18));
     result = await trigger(fixture.vehicleId);
   }
-  const passed = name === "valid" ? result.decision === "GRANTED" : name === "recorded" ? result.decision === "WATCH" : !result.ok;
+  const selectedMode = currentSummary?.junctions?.find(j => j.id === selectedJunction)?.controller_mode || "ADVISORY";
+  const passed = name === "valid"
+    ? (selectedMode === "ADVISORY" ? result.decision === "RECOMMENDED" : result.decision === "APPLYING")
+    : name === "recorded" || name === "unknown-unit" || name === "revoked-unit" ? result.decision === "WATCH" || result.decision === "DENIED"
+      : !result.ok;
   const line = `${passed ? "PASS" : "FAIL"} ${name}: ${result.decision || result.reason || result.status} — ${result.reason || ""}`;
   console[passed ? "log" : "error"](line);
   if ($("#dual-key-status")) $("#dual-key-status").textContent = line;
@@ -1450,7 +1713,7 @@ async function runDualKeyAttack(name) {
 }
 
 async function refreshDualKeyData() {
-  const [vehicles, audit] = await Promise.all([fetch("/api/vehicles").then(r => r.json()), fetch("/api/audit").then(r => r.json())]);
+  const [vehicles, units, audit] = await Promise.all([fetch("/api/vehicles").then(r => r.json()), fetch("/api/units").then(r => r.json()), fetch("/api/audit").then(r => r.json())]);
   latestVerifiedVehicleReports = Object.fromEntries(vehicles.vehicles
     .filter(vehicle => vehicle.status === "approved" && vehicle.junctions)
     .map(vehicle => [vehicle.vehicle_id, vehicle.junctions]));
@@ -1462,6 +1725,11 @@ async function refreshDualKeyData() {
     const result = await attackPost(`/api/dev/vehicle/${encodeURIComponent(button.dataset.vehicle)}/status`, { status: button.dataset.adminStatus }, { "X-Admin-Token": $("#admin-token")?.value || "" });
     if (!result.ok) toast(result.reason); await refreshDualKeyData();
   }));
+  if ($("#unit-registry-body")) $("#unit-registry-body").innerHTML = units.units.map(u => `<tr><td>${u.unit_id}</td><td>${u.junction_id}</td><td>${u.status}</td><td>${u.last_event_at || "—"}</td><td><button data-unit-status="${u.status === "approved" ? "revoked" : "approved"}" data-unit="${u.unit_id}">${u.status === "approved" ? "Revoke" : "Approve"}</button></td></tr>`).join("");
+  $("#unit-registry-body")?.querySelectorAll("[data-unit-status]").forEach(button => button.addEventListener("click", async () => {
+    const result = await attackPost(`/api/dev/unit/${encodeURIComponent(button.dataset.unit)}/status`, { status: button.dataset.unitStatus }, { "X-Admin-Token": $("#admin-token")?.value || "" });
+    if (!result.ok) toast(result.reason); await refreshDualKeyData();
+  }));
   if ($("#audit-chain-status")) $("#audit-chain-status").textContent = audit.chain_valid ? "CHAIN VALID" : "CHAIN BROKEN";
   if ($("#audit-log-body")) $("#audit-log-body").innerHTML = audit.entries.slice().reverse().map(e => `<tr><td>${e.decision}</td><td>${e.reason}</td><td>${e.vehicle_id || "—"}</td><td>${e.junction || "—"}</td><td>${e.timestamp}</td></tr>`).join("");
   updateLiveMath();
@@ -1470,9 +1738,13 @@ async function refreshDualKeyData() {
 function initDualKeyTools(panel, enabled) {
   panel.querySelectorAll("[data-attack]").forEach(button => button.addEventListener("click", () => runDualKeyAttack(button.dataset.attack).catch(error => { console.error(error); toast(error.message); })));
   $("#vehicle-refresh")?.addEventListener("click", refreshDualKeyData);
+  $("#junction-unit-enroll")?.addEventListener("click", async () => {
+    try { await enrollJunctionUnit($("#preempt-junction")?.value || "J2"); }
+    catch (error) { if ($("#junction-unit-status")) $("#junction-unit-status").textContent = error.message; }
+  });
   $("#attack-self-check")?.addEventListener("click", async () => {
     console.group("Dual-key spoof resistance self-check");
-    for (const name of ["recorded", "replay", "tamper", "revoked", "teleport", "valid"]) await runDualKeyAttack(name);
+    for (const name of ["recorded", "replay", "tamper", "revoked", "teleport", "valid", "unknown-unit", "revoked-unit", "replay-event", "wrong-junction"]) await runDualKeyAttack(name);
     console.groupEnd();
   });
   if (enabled) refreshDualKeyData().catch(console.error);
@@ -1703,6 +1975,17 @@ function initModuleA() {
   });
   $("#verified-vehicle")?.addEventListener("change", updateLiveMath);
   $("#queue-self-check")?.addEventListener("click", runQueueModelSelfCheck);
+  $("#harm-self-check")?.addEventListener("click", runHarmSelfCheck);
+  $("#controller-self-check")?.addEventListener("click", runControllerSelfCheck);
+  $("#junctions-grid")?.addEventListener("change", event => {
+    const select = event.target.closest("[data-controller-mode]");
+    if (select) updateControllerMode(select.dataset.junction, select.value);
+  });
+  $("#controller-recommendation")?.addEventListener("click", event => {
+    const action = event.target.closest("[data-recommendation-action]")?.dataset.recommendationAction;
+    if (action) handleRecommendation(action);
+  });
+  $("#controller-manual-override")?.addEventListener("click", requestManualOverride);
 
   if ($("#preempt-junction")) {
     $("#preempt-junction").addEventListener("change", () => {
@@ -1965,3 +2248,17 @@ load();
 drawChart();
 updateHeaderClock();
 setInterval(updateHeaderClock, 1000);
+setInterval(load, 5000);
+controllerHeartbeat("decision");
+setInterval(() => {
+  controllerHeartbeat("decision");
+  if (isMicActive) controllerHeartbeat("input");
+}, 1000);
+function tickHarmCountdowns() {
+  document.querySelectorAll(".harm-countdown[data-seconds]").forEach(el => {
+    const next = Math.max(0, Number(el.dataset.seconds || 0) - 1);
+    el.dataset.seconds = String(next);
+    el.textContent = `${Math.ceil(next)}s`;
+  });
+}
+setInterval(tickHarmCountdowns, 1000);
