@@ -25,11 +25,11 @@
   <main class="main">
     <header class="topbar">
       <div>
-        <div class="eyebrow" id="corridor-breadcrumb">SMART MOBILITY / NH-206: CIT GUBBI – TUMAKURU CORRIDOR (S2)</div>
+        <div class="eyebrow" id="corridor-breadcrumb">SMART MOBILITY / NH-206: TUMAKURU – GUBBI – NITTUR CORRIDOR (28.5 KM)</div>
         <h1 id="pageTitle">Good morning, operator <span>✦</span></h1>
       </div>
       <div class="top-actions">
-        <button class="top-action-btn" id="btn-switch-corridor" title="Switch corridor scenario">Switch: NH-206 ⇄ Bengaluru</button>
+        <span class="top-action-btn" style="background: rgba(2, 132, 199, 0.2); border-color: rgba(56, 189, 248, 0.4); color: #38bdf8; cursor: default; font-weight: 700;">📍 NH-206: Tumakuru – Gubbi – Nittur (28.5 km)</span>
         <button class="top-action-btn" id="btn-sim-tick" title="Simulate real-time traffic pulse">⚡ Sim Tick</button>
         <button class="top-action-btn info-btn" id="btn-s2-info" title="View S2 math and constraints">S2 Math &amp; Constraints</button>
         <span class="demo-pill"><i></i> DEMO DATA</span>
@@ -136,29 +136,65 @@
         </div>
       </div>
 
-      <!-- Map & Priority Incidents Grid -->
+      <!-- Map & Priority Incidents Grid: Tumakuru - Gubbi - Nittur Corridor -->
       <div class="content-grid">
         <div class="panel map-panel glass">
-          <div class="panel-heading"><div><div class="section-kicker">NETWORK VIEW</div><h3>Traffic flow map &amp; digital twin</h3></div><div class="map-legend"><button class="top-action-btn" data-goto="corridor-map" style="padding: 3px 8px; font-size: 11px; margin-right: 6px;">🗺️ Open OSM Map →</button><span><i class="dot green"></i> Flowing</span><span><i class="dot amber"></i> Slow</span><span><i class="dot red"></i> Incident</span><span><i class="dot emerald-pulse"></i> Green Wave</span></div></div>
-          <div class="map-wrap">
-            <svg class="city-map" viewBox="0 0 760 430" role="img" aria-label="Stylized Bengaluru and NH-206 road map with traffic conditions">
-              <defs><pattern id="grid" width="34" height="34" patternUnits="userSpaceOnUse"><path d="M 34 0 L 0 0 0 34" fill="none" stroke="#a7b7c8" stroke-opacity=".09" stroke-width="1"/></pattern></defs>
-              <rect width="760" height="430" fill="url(#grid)"/>
-              <g class="blocks"><path d="M20 30h125v72H20zM178 28h105v88H178zM325 22h110v76H325zM490 22h105v90H490zM630 20h105v90H630zM25 150h115v80H25zM170 145h115v92H170zM325 145h120v80H325zM490 150h105v80H490zM630 150h100v95H630zM25 285h115v100H25zM175 285h110v100H175zM330 275h110v105H330zM490 285h100v95H490zM630 290h105v95H630z"/></g>
-              <g class="roads"><path d="M-10 120 C140 130 200 110 330 135 S580 160 780 120" class="road"/><path d="M-10 255 C130 220 260 260 390 240 S610 215 780 260" class="road"/><path d="M95 -10 C130 100 105 190 150 440" class="road"/><path d="M300 -10 C270 100 340 210 315 440" class="road"/><path d="M510 -10 C480 100 535 230 500 440" class="road"/><path d="M680 -10 C650 110 700 250 665 440" class="road"/><path d="M-10 365 C160 330 250 360 400 340 S630 350 780 320" class="road"/></g>
-              <!-- Animated Green Wave SVG Corridor Path -->
-              <path id="svg-green-wave-corridor" d="M-10 255 C130 220 260 260 390 240 S610 215 780 260" class="green-wave-path"/>
-              <g class="flow-lines"><path d="M5 120 C140 130 200 110 330 135 S580 160 755 120" class="flow amber"/><path d="M-5 255 C130 220 260 260 390 240 S610 215 770 260" class="flow green"/><path d="M300 0 C270 100 340 210 315 430" class="flow green"/><path d="M510 0 C480 100 535 230 500 430" class="flow amber"/><path d="M-5 365 C160 330 250 360 400 340 S630 350 770 320" class="flow green"/></g>
-              <g class="map-labels"><text x="28" y="108">CIT Gubbi (J1)</text><text x="355" y="115">Gubbi Cross (J2)</text><text x="540" y="145">Nittur Market (J3)</text><text x="35" y="244">Central Corridor</text><text x="520" y="245">Batawadi (J4)</text><text x="170" y="405">Koramangala</text><text x="550" y="405">Tumakuru Entry</text></g>
-              <g id="mapMarkers"></g>
-            </svg>
-            <div class="map-caption"><span><b>◉</b> Select a marker to inspect an incident</span><span id="svg-map-caption">NH-206 CORRIDOR · 4-JUNCTION DIGITAL TWIN</span></div>
+          <div class="panel-heading">
+            <div>
+              <div class="section-kicker">REAL GEOGRAPHY · OPENSTREETMAP DIGITAL TWIN</div>
+              <h3>NH-206 Corridor: Tumakuru – Gubbi – Nittur (28.5 km)</h3>
+            </div>
+            <div class="map-legend">
+              <span class="scope-pill" style="font-size: 10px; padding: 2px 8px;">Prototype scope: Tumakuru - Gubbi - Nittur only</span>
+              <span><i class="dot green"></i> Real Signal (J1)</span>
+              <span><i class="dot amber"></i> Proposed ITS (J2, J3, J4)</span>
+              <span><i class="dot emerald-pulse"></i> Green Wave</span>
+            </div>
+          </div>
+          <div class="corridor-map-container" style="padding: 0; margin-top: 10px;">
+            <!-- Real Leaflet OpenStreetMap Container -->
+            <div id="corridor-leaflet-map" style="width: 100%; height: 420px; border-radius: 12px; z-index: 1;"></div>
+            <div class="map-caption" style="margin-top: 8px;">
+              <span><b>◉</b> Click any junction marker to inspect queue discharge &amp; signal state</span>
+              <span id="svg-map-caption">© OpenStreetMap contributors · ODbL (NH-206 / BH Road)</span>
+            </div>
+            <!-- Interactive Corridor Chainage Ruler -->
+            <div class="chainage-ruler-strip glass" style="margin-top: 10px;">
+              <div class="ruler-title">
+                <b>CORRIDOR CHAINAGE RULER (metres from Tumakuru start)</b>
+                <span id="ruler-hover-info">0.0 km (Batawadi NH-48) → 28.5 km (Nittur Market)</span>
+              </div>
+              <div class="chainage-bar" id="chainage-bar-track">
+                <div class="chainage-fill" id="chainage-fill"></div>
+                <div class="chainage-pin pin-tumakuru" style="left: 0%;" data-junction="J1" title="Tumakuru Batawadi (0 km)">
+                  <span class="pin-dot real"></span><small>0.0 km (J1 Real)</small>
+                </div>
+                <div class="chainage-pin pin-cit" style="left: 66.5%;" data-junction="J2" title="CIT Campus Gate (19.0 km)">
+                  <span class="pin-dot proposed"></span><small>19.0 km (J2 Proposed)</small>
+                </div>
+                <div class="chainage-pin pin-gubbi" style="left: 68.4%;" data-junction="J3" title="Gubbi Town Cross (19.5 km)">
+                  <span class="pin-dot proposed"></span><small>19.5 km (J3 Proposed)</small>
+                </div>
+                <div class="chainage-pin pin-nittur" style="left: 100%;" data-junction="J4" title="Nittur Bottleneck (28.5 km)">
+                  <span class="pin-dot proposed"></span><small>28.5 km (J4 Proposed)</small>
+                </div>
+              </div>
+              <div class="ruler-ticks">
+                <span>0 km (Tumakuru)</span>
+                <span>5 km</span>
+                <span>10 km</span>
+                <span>15 km</span>
+                <span>20 km (Gubbi)</span>
+                <span>25 km</span>
+                <span>28.5 km (Nittur)</span>
+              </div>
+            </div>
           </div>
         </div>
         <div class="panel incident-panel glass">
           <div class="panel-heading"><div><div class="section-kicker">NEEDS ATTENTION</div><h3>Priority incidents</h3></div><button class="text-button" data-goto="traffic">View all →</button></div>
           <div id="priorityList" class="priority-list"></div>
-          <div class="route-card"><div class="route-top"><span class="route-icon">↗</span><div><b>Suggested detour</b><small>For ORR · Marathahalli</small></div><span class="route-tag">+7 min</span></div><p>Kundalahalli Gate <span>→</span> AECS Layout <span>→</span> Service road</p><button class="route-action" data-incident="DF-104">View route details <b>↗</b></button></div>
+          <div class="route-card"><div class="route-top"><span class="route-icon">↗</span><div><b>Suggested detour</b><small>For NH-206 · Gubbi Cross</small></div><span class="route-tag">+8 min</span></div><p>Gubbi Town Bypass <span>→</span> Rural Link Feeder <span>→</span> NH-206 Highway</p><button class="route-action" data-incident="NH-204">View route details <b>↗</b></button></div>
         </div>
       </div>
       <div class="help-strip glass"><div class="help-symbol">✳</div><div><b>How DOME Flow S2 helps the city &amp; highway</b><p>Combines acoustic FFT emergency vehicle preemption, saturation-flow queue discharge, and zero-touch crowd-sourced road surface shocks to support emergency response and identify pothole risks.</p></div><span class="help-arrow">↗</span></div>
@@ -183,7 +219,7 @@
       </div>
 
       <div class="corridor-map-container glass">
-        <div id="corridor-leaflet-map" style="width: 100%; height: 530px; border-radius: 12px; z-index: 1;"></div>
+        <div id="corridor-dedicated-map" style="width: 100%; height: 580px; border-radius: 12px; z-index: 1;"></div>
 
         <!-- Interactive Chainage Ruler Strip below Map -->
         <div class="chainage-ruler-strip glass">

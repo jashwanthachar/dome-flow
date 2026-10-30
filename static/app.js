@@ -2438,85 +2438,98 @@ function updateHeaderClock() {
 // 4. CORRIDOR LEAFLET MAP & CHAINAGE RULER
 // ==========================================
 let corridorLeafletMap = null;
-let corridorRoadLayer = null;
+let corridorDedicatedMap = null;
+let corridorRoadLayers = [];
 let corridorJunctionMarkers = {};
 let corridorDataCache = null;
 
+function setupSingleLeafletMap(containerId, res) {
+  const container = document.getElementById(containerId);
+  if (!container || typeof L === "undefined") return null;
+
+  const map = L.map(containerId, {
+    center: [13.318, 76.980],
+    zoom: 11,
+    minZoom: 9,
+    maxZoom: 18
+  });
+
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>'
+  }).addTo(map);
+
+  const scopeControl = L.control({ position: "topright" });
+  scopeControl.onAdd = function() {
+    const div = L.DomUtil.create("div", "leaflet-scope-pill");
+    div.innerHTML = '<span style="background: rgba(15, 23, 42, 0.92); color: #38bdf8; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 700; border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 4px 12px rgba(0,0,0,0.5);">Prototype scope: Tumakuru - Gubbi - Nittur corridor only.</span>';
+    return div;
+  };
+  scopeControl.addTo(map);
+
+  if (res.road) {
+    const roadLayer = L.geoJSON(res.road, {
+      filter: feature => feature.geometry.type === "LineString",
+      style: () => ({
+        color: preemptionActive ? "#10b981" : "#0284c7",
+        weight: 6,
+        opacity: 0.9,
+        lineCap: "round",
+        lineJoin: "round"
+      })
+    }).addTo(map);
+    corridorRoadLayers.push(roadLayer);
+
+    if (roadLayer.getBounds().isValid()) {
+      map.fitBounds(roadLayer.getBounds(), { padding: [25, 25] });
+    }
+  }
+
+  if (res.total_length_m) {
+    const milestones = [0, 5000, 10000, 15000, 20000, 25000, Math.round(res.total_length_m)];
+    const lineCoords = (res.road?.features?.find(f => f.geometry.type === "LineString")?.geometry?.coordinates) || [];
+    const chainages = (res.road?.features?.find(f => f.geometry.type === "LineString")?.properties?.chainages) || [];
+
+    if (lineCoords.length && chainages.length) {
+      milestones.forEach(m => {
+        const km = (m / 1000).toFixed(m === res.total_length_m ? 1 : 0);
+        let lat = 13.34, lon = 77.10;
+        for (let i = 0; i < chainages.length - 1; i++) {
+          if (chainages[i] <= m && m <= chainages[i+1]) {
+            const t = (m - chainages[i]) / (chainages[i+1] - chainages[i] || 1);
+            lon = lineCoords[i][0] + t * (lineCoords[i+1][0] - lineCoords[i][0]);
+            lat = lineCoords[i][1] + t * (lineCoords[i+1][1] - lineCoords[i][1]);
+            break;
+          }
+        }
+        const icon = L.divIcon({
+          className: "corridor-marker-milestone",
+          html: `${km} km`,
+          iconSize: [36, 16],
+          iconAnchor: [18, 8]
+        });
+        L.marker([lat, lon], { icon }).addTo(map)
+          .bindTooltip(`Chainage Milestone: ${km} km (${m} m from Tumakuru start)`);
+      });
+    }
+  }
+
+  return map;
+}
+
 async function initCorridorMap() {
-  const mapContainer = $("#corridor-leaflet-map");
-  if (!mapContainer || typeof L === "undefined") return;
+  if (typeof L === "undefined") return;
 
   try {
     const res = await api("/api/corridor");
     corridorDataCache = res;
 
-    if (!corridorLeafletMap) {
-      corridorLeafletMap = L.map("corridor-leaflet-map", {
-        center: [13.318, 76.980],
-        zoom: 11,
-        minZoom: 9,
-        maxZoom: 18
-      });
-
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>'
-      }).addTo(corridorLeafletMap);
-
-      const scopeControl = L.control({ position: "topright" });
-      scopeControl.onAdd = function() {
-        const div = L.DomUtil.create("div", "leaflet-scope-pill");
-        div.innerHTML = '<span style="background: rgba(15, 23, 42, 0.9); color: #38bdf8; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 700; border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 4px 12px rgba(0,0,0,0.5);">Prototype scope: Tumakuru - Gubbi - Nittur corridor only.</span>';
-        return div;
-      };
-      scopeControl.addTo(corridorLeafletMap);
+    corridorRoadLayers = [];
+    if ($("#corridor-leaflet-map") && !corridorLeafletMap) {
+      corridorLeafletMap = setupSingleLeafletMap("corridor-leaflet-map", res);
     }
-
-    if (res.road) {
-      if (corridorRoadLayer) corridorLeafletMap.removeLayer(corridorRoadLayer);
-      corridorRoadLayer = L.geoJSON(res.road, {
-        filter: feature => feature.geometry.type === "LineString",
-        style: () => ({
-          color: preemptionActive ? "#10b981" : "#0284c7",
-          weight: 6,
-          opacity: 0.9,
-          lineCap: "round",
-          lineJoin: "round"
-        })
-      }).addTo(corridorLeafletMap);
-
-      if (corridorRoadLayer.getBounds().isValid()) {
-        corridorLeafletMap.fitBounds(corridorRoadLayer.getBounds(), { padding: [30, 30] });
-      }
-    }
-
-    if (res.total_length_m) {
-      const milestones = [0, 5000, 10000, 15000, 20000, 25000, Math.round(res.total_length_m)];
-      const lineCoords = (res.road?.features?.find(f => f.geometry.type === "LineString")?.geometry?.coordinates) || [];
-      const chainages = (res.road?.features?.find(f => f.geometry.type === "LineString")?.properties?.chainages) || [];
-
-      if (lineCoords.length && chainages.length) {
-        milestones.forEach(m => {
-          const km = (m / 1000).toFixed(m === res.total_length_m ? 1 : 0);
-          let lat = 13.34, lon = 77.10;
-          for (let i = 0; i < chainages.length - 1; i++) {
-            if (chainages[i] <= m && m <= chainages[i+1]) {
-              const t = (m - chainages[i]) / (chainages[i+1] - chainages[i] || 1);
-              lon = lineCoords[i][0] + t * (lineCoords[i+1][0] - lineCoords[i][0]);
-              lat = lineCoords[i][1] + t * (lineCoords[i+1][1] - lineCoords[i][1]);
-              break;
-            }
-          }
-          const icon = L.divIcon({
-            className: "corridor-marker-milestone",
-            html: `${km} km`,
-            iconSize: [36, 16],
-            iconAnchor: [18, 8]
-          });
-          L.marker([lat, lon], { icon }).addTo(corridorLeafletMap)
-            .bindTooltip(`Chainage Milestone: ${km} km (${m} m from Tumakuru start)`);
-        });
-      }
+    if ($("#corridor-dedicated-map") && !corridorDedicatedMap) {
+      corridorDedicatedMap = setupSingleLeafletMap("corridor-dedicated-map", res);
     }
 
     updateCorridorJunctionMarkers(res.junctions || []);
@@ -2533,7 +2546,9 @@ async function initCorridorMap() {
 }
 
 function updateCorridorJunctionMarkers(junctionsList) {
-  if (!corridorLeafletMap || !junctionsList) return;
+  if (!junctionsList) return;
+  const maps = [corridorLeafletMap, corridorDedicatedMap].filter(Boolean);
+  if (!maps.length) return;
 
   junctionsList.forEach(j => {
     const lat = Number(j.lat), lon = Number(j.lon || j.lng);
@@ -2570,26 +2585,33 @@ function updateCorridorJunctionMarkers(junctionsList) {
       </div>
     `;
 
-    if (corridorJunctionMarkers[j.id]) {
-      corridorJunctionMarkers[j.id].setLatLng([lat, lon]);
-      corridorJunctionMarkers[j.id].setIcon(customIcon);
-      corridorJunctionMarkers[j.id].setPopupContent(popupHtml);
-    } else {
-      const marker = L.marker([lat, lon], { icon: customIcon }).addTo(corridorLeafletMap);
-      marker.bindPopup(popupHtml);
-      corridorJunctionMarkers[j.id] = marker;
-    }
+    maps.forEach(map => {
+      const key = `${map._leaflet_id || 'm'}_${j.id}`;
+      if (corridorJunctionMarkers[key]) {
+        corridorJunctionMarkers[key].setLatLng([lat, lon]);
+        corridorJunctionMarkers[key].setIcon(customIcon);
+        corridorJunctionMarkers[key].setPopupContent(popupHtml);
+      } else {
+        const marker = L.marker([lat, lon], { icon: customIcon }).addTo(map);
+        marker.bindPopup(popupHtml);
+        corridorJunctionMarkers[key] = marker;
+      }
+    });
   });
 }
 
 window.openJunctionFromMap = function(junctionId) {
   if (!junctionId) return;
 
-  const marker = corridorJunctionMarkers[junctionId];
-  if (marker && corridorLeafletMap) {
-    corridorLeafletMap.panTo(marker.getLatLng(), { animate: true, duration: 0.8 });
-    marker.openPopup();
-  }
+  const maps = [corridorLeafletMap, corridorDedicatedMap].filter(Boolean);
+  maps.forEach(map => {
+    const key = `${map._leaflet_id || 'm'}_${junctionId}`;
+    const marker = corridorJunctionMarkers[key];
+    if (marker) {
+      map.panTo(marker.getLatLng(), { animate: true, duration: 0.8 });
+      marker.openPopup();
+    }
+  });
 
   const selector = $("#preempt-junction");
   if (selector) {
@@ -2611,6 +2633,7 @@ window.openJunctionFromMap = function(junctionId) {
   const km = jData?.chainage_m ? (jData.chainage_m / 1000).toFixed(1) : "";
   toast(`Selected: ${junctionId} · ${jName} ${km ? '(' + km + ' km)' : ''}`);
 };
+
 
 // Bootstrap all modules
 initTopbarAndModals();
