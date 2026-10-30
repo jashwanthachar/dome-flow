@@ -234,6 +234,7 @@
             <div class="fft-controls">
               <button class="primary-btn mic-btn" id="btn-mic-toggle">🎙️ Start Live Siren Mic (FFT)</button>
               <div class="siren-summary">
+                <strong id="mic-privacy-indicator" hidden>MICROPHONE OFF</strong>
                 <span>State <b id="siren-detector-state">IDLE</b></span>
                 <span>Pattern <b id="siren-detector-label">none</b></span>
                 <span>Score <b id="siren-detector-confidence">0.00</b></span>
@@ -244,6 +245,23 @@
               <span>Prominence <b id="siren-prominence">—</b></span>
               <span>Flatness <b id="siren-flatness">—</b></span>
             </div>
+          </div>
+
+          <div class="privacy-panel glass" id="privacy-panel">
+            <div class="range-panel-heading"><b>Privacy controls</b><span>Install ID <strong id="privacy-install-id">Creating…</strong></span></div>
+            <p>Audio is analyzed in this browser. No raw audio, waveform, spectrogram, or recording is uploaded or retained.</p>
+            <div class="privacy-mic-row"><span id="mic-consent-state">No microphone consent recorded</span><button type="button" id="mic-consent-withdraw">Withdraw mic consent / stop</button></div>
+            <div class="range-table-wrap"><table class="range-table"><thead><tr><th>Device</th><th>Fields sent</th><th>Purpose</th></tr></thead><tbody>
+              <tr><td>108 driver app</td><td>Enrollment: vehicle_id, public_key. Status query: vehicle_id. On duty: vehicle_id, lat, lon, heading_deg, speed_kmh, timestamp, nonce, signature. Header: X-Privacy-Install-ID.</td><td>Exact position only for an enrolled, approved vehicle after Start duty; stopped on End duty</td></tr>
+              <tr><td>Junction unit demo</td><td>Enrollment: unit_id, junction_id, public_key. Event: unit_id, junction_id, timestamp, nonce, label, confidence, approach, slope, r_squared, signature. Header: X-Privacy-Install-ID.</td><td>Signed derived siren confirmation; raw audio never leaves the device</td></tr>
+              <tr><td>Dashboard decision</td><td>junction_id, vehicle_id, stage, siren_confidence, siren_confirmed, unit_event_id, siren_label, approach, approach_conf, cars, trucks, bikes. Header: X-Privacy-Install-ID.</td><td>Evaluate and audit a preemption request</td></tr>
+              <tr><td>Road-shock demo</td><td>corridor, jerk_mps3, speed_kmh, source, probe_id; X-Privacy-Install-ID header</td><td>Separate demo telemetry; sends no GPS or audio</td></tr>
+            </tbody></table></div>
+            <p>Exact location is sent only while an enrolled, approved ambulance is on duty. This demo sends no location in non-emergency requests; if that changes, use a roughly 50 m grid. The per-install ID is random and resettable. Other dashboard control requests may contain only their operation fields (for example source, junction_id, mode, or scenario); inspect the viewer for the exact latest JSON body.</p>
+            <div class="privacy-actions"><button type="button" id="privacy-refresh">Refresh retention summary</button><button type="button" id="privacy-delete">Delete my data</button><button type="button" id="privacy-reset-id">Delete data &amp; reset ID</button><button type="button" id="privacy-self-check">Run privacy self-check</button></div>
+            <p id="privacy-retention-status" role="status">Loading retention status…</p>
+            <p id="privacy-status" role="status">Audit entries are retained without coordinates; identifier redaction recomputes the chain.</p>
+            <label>Last request payload sent (local viewer)<textarea id="privacy-last-payload" readonly rows="7">No request payload captured yet.</textarea></label>
           </div>
 
           <div class="range-panel glass" id="siren-range-panel">
@@ -504,5 +522,12 @@
 </div>
 
 <div class="toast" id="toast"></div>
+<dialog class="privacy-consent-dialog" id="siren-consent-dialog" aria-labelledby="siren-consent-title">
+  <h2 id="siren-consent-title">Microphone consent</h2>
+  <p><strong>What:</strong> the browser reads live microphone samples to calculate siren frequency pattern, confidence, loudness trend, slope and R-squared. Raw samples, recordings, waveforms and spectrograms stay in memory on this device and are not uploaded or saved.</p>
+  <p><strong>Why:</strong> derive a local siren event. Only the derived event fields are sent, signed by the junction-unit demo key.</p>
+  <p><strong>How long:</strong> the microphone is used only while active; signed derived acoustic events are retained on the server for up to 7 days. You can stop the mic or withdraw consent below at any time; withdrawal stops capture and blocks further acoustic requests.</p>
+  <div class="privacy-actions"><button type="button" id="mic-consent-accept">Accept and start</button><button type="button" id="mic-consent-deny">Deny</button></div>
+</dialog>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body></html>

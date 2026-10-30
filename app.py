@@ -57,6 +57,15 @@ AUTH_CONFIG = {
     "MAX_JUNCTION_UNITS": 100  # ASSUMPTION: in-memory demo registry capacity.
 }
 
+# In-memory retention periods are ASSUMPTIONS for this prototype, not a legal schedule.
+RETENTION_CONFIG = {
+    "VEHICLE_POSITION_TRACE_S": 24 * 60 * 60,  # ASSUMPTION: exact signed position is retained for 24 hours.
+    "ACOUSTIC_EVENT_S": 7 * 24 * 60 * 60,  # ASSUMPTION: signed derived acoustic events are kept for 7 days.
+    "QUEUE_BASELINES": "aggregated_only",  # ASSUMPTION: no individual device queue history is retained.
+    "AUDIT_LOG": "kept",  # ASSUMPTION: retain decisions, with identifiers redacted on data deletion.
+    "AUDIT_POSITION_REDACT_S": 24 * 60 * 60  # ASSUMPTION: any future audit position field is rounded after 24 hours.
+}
+
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 JUNCTION_ARM_BEARINGS = {
@@ -72,13 +81,14 @@ acoustic_event_registry = {}
 seen_nonces = {}
 audit_entries = []
 audit_head_hash = "0" * 64
+privacy_owners = {}
 
 
 def india_now():
     return datetime.now(INDIA_TZ)
 
 
-def _append_audit_locked(decision, reason, vehicle_id=None, junction_id=None):
+def _append_audit_locked(decision, reason, vehicle_id=None, junction_id=None, position=None):
     global audit_head_hash
     content = {
         "sequence": len(audit_entries) + 1,
@@ -86,7 +96,8 @@ def _append_audit_locked(decision, reason, vehicle_id=None, junction_id=None):
         "reason": str(reason),
         "vehicle_id": vehicle_id,
         "junction": junction_id,
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "position": position
     }
     previous_hash = audit_head_hash
     serialized = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -95,6 +106,120 @@ def _append_audit_locked(decision, reason, vehicle_id=None, junction_id=None):
     audit_entries.append(entry)
     audit_head_hash = entry_hash
     return entry
+
+
+def _rechain_audit_locked():
+    """Recompute audit hashes after identifier redaction; audit entries remain in sequence."""
+    global audit_head_hash
+    previous = "0" * 64
+    for sequence, entry in enumerate(audit_entries, 1):
+        content = {key: entry.get(key) for key in ("sequence", "decision", "reason", "vehicle_id", "junction", "timestamp", "position")}
+        content["sequence"] = sequence
+        entry.update(content)
+        serialized = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        digest = hashlib.sha256((previous + serialized).encode("utf-8")).hexdigest()
+        entry["previous_hash"], entry["hash"] = previous, digest
+        previous = digest
+    audit_head_hash = previous
+
+
+def _audit_chain_valid_locked():
+    previous = "0" * 64
+    for sequence, entry in enumerate(audit_entries, 1):
+        content = {key: entry[key] for key in ("sequence", "decision", "reason", "vehicle_id", "junction", "timestamp", "position")}
+        if entry.get("sequence") != sequence:
+            return False
+        serialized = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        expected = hashlib.sha256((previous + serialized).encode("utf-8")).hexdigest()
+        if entry.get("previous_hash") != previous or entry.get("hash") != expected:
+            return False
+        previous = expected
+    return previous == audit_head_hash
+
+
+def _install_id():
+    value = request.headers.get("X-Privacy-Install-ID", "")
+    return value if isinstance(value, str) and re.fullmatch(r"[a-f0-9]{32}", value) else None
+
+
+def _remember_privacy_record_locked(install_id, category, record_id):
+    if not install_id:
+        return
+    owner = privacy_owners.setdefault(install_id, {"vehicles": set(), "units": set()})
+    owner[category].add(record_id)
+
+
+def _round_coordinates_to_grid(lat, lon, grid_m=50):
+    lat_step = grid_m / 111320.0
+    lon_step = grid_m / (111320.0 * max(math.cos(math.radians(float(lat))), 0.01))
+    return {"lat": round(round(float(lat) / lat_step) * lat_step, 6),
+            "lon": round(round(float(lon) / lon_step) * lon_step, 6), "precision_m": grid_m}
+
+
+def _round_expired_audit_positions_locked(now):
+    changed = False
+    for entry in audit_entries:
+        position = entry.get("position")
+        if not isinstance(position, dict) or position.get("precision_m"):
+            continue
+        try:
+            age = now - datetime.fromisoformat(entry["timestamp"]).timestamp()
+            if age > RETENTION_CONFIG["AUDIT_POSITION_REDACT_S"]:
+                entry["position"] = _round_coordinates_to_grid(position["lat"], position["lon"])
+                changed = True
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+    if changed:
+        _rechain_audit_locked()
+
+
+def _purge_retention_locked(now=None):
+    now = now or datetime.now(timezone.utc).timestamp()
+    for vehicle in vehicle_registry.values():
+        report = vehicle.get("latest_report")
+        if report and now - report.get("timestamp", now) > RETENTION_CONFIG["VEHICLE_POSITION_TRACE_S"]:
+            vehicle["latest_report"] = None
+    expired_ids = []
+    for event_id, event in acoustic_event_registry.items():
+        if now - event.get("timestamp", now) > RETENTION_CONFIG["ACOUSTIC_EVENT_S"]:
+            expired_ids.append(event_id)
+    for event_id in expired_ids:
+        event = acoustic_event_registry.pop(event_id, None)
+        if event:
+            unit = junction_unit_registry.get(event.get("unit_id"))
+            if unit and (unit.get("latest_event") or {}).get("event_id") == event_id:
+                unit["latest_event"] = None
+    for nonce, timestamp in list(seen_nonces.items()):
+        if now - timestamp > AUTH_CONFIG["NONCE_WINDOW_S"]:
+            seen_nonces.pop(nonce, None)
+    _round_expired_audit_positions_locked(now)
+
+
+def _delete_install_data_locked(install_id):
+    owner = privacy_owners.pop(install_id, {"vehicles": set(), "units": set()})
+    vehicle_ids, unit_ids = owner["vehicles"], owner["units"]
+    for vehicle_id in vehicle_ids:
+        vehicle_registry.pop(vehicle_id, None)
+    for unit_id in unit_ids:
+        junction_unit_registry.pop(unit_id, None)
+    for event_id, event in list(acoustic_event_registry.items()):
+        if event.get("unit_id") in unit_ids:
+            acoustic_event_registry.pop(event_id, None)
+    for nonce in list(seen_nonces):
+        if any(nonce.startswith(f"{identity}:") or nonce.startswith(f"unit:{identity}:") for identity in vehicle_ids | unit_ids):
+            seen_nonces.pop(nonce, None)
+    for entry in audit_entries:
+        if entry.get("vehicle_id") in vehicle_ids | unit_ids:
+            entry["vehicle_id"] = None
+            entry["position"] = None
+    _rechain_audit_locked()
+    return {"vehicle_records": len(vehicle_ids), "unit_records": len(unit_ids)}
+
+
+@app.before_request
+def enforce_retention():
+    with lock:
+        _purge_retention_locked()
 
 
 def _audit(decision, reason, vehicle_id=None, junction_id=None):
@@ -1207,6 +1332,7 @@ def enroll_vehicle():
         if existing:
             if existing["public_key_b64"] != public_key_b64:
                 return jsonify({"ok": False, "reason": "Vehicle ID is already enrolled with another key"}), 409
+            _remember_privacy_record_locked(_install_id(), "vehicles", vehicle_id)
             return jsonify({"ok": True, "vehicle_id": vehicle_id, "status": existing["status"]})
         if len(vehicle_registry) >= AUTH_CONFIG["MAX_VEHICLES"]:
             return jsonify({"ok": False, "reason": "Vehicle registry is full"}), 507
@@ -1218,6 +1344,7 @@ def enroll_vehicle():
             "latest_report": None,
             "report_times": deque()
         }
+        _remember_privacy_record_locked(_install_id(), "vehicles", vehicle_id)
         _append_audit_locked("enrolled", "Vehicle key awaiting admin approval", vehicle_id)
     return jsonify({"ok": True, "vehicle_id": vehicle_id, "status": "pending"}), 201
 
@@ -1291,12 +1418,14 @@ def enroll_junction_unit():
         if existing:
             if existing["public_key_b64"] != public_key_b64 or existing["junction_id"] != junction_id:
                 return jsonify({"ok": False, "reason": "Unit ID is already enrolled with another key or junction"}), 409
+            _remember_privacy_record_locked(_install_id(), "units", unit_id)
             return jsonify({"ok": True, "unit_id": unit_id, "junction_id": junction_id, "status": existing["status"]})
         if len(junction_unit_registry) >= AUTH_CONFIG["MAX_JUNCTION_UNITS"]:
             return jsonify({"ok": False, "reason": "Junction unit registry is full"}), 507
         junction_unit_registry[unit_id] = {"junction_id": junction_id, "status": "pending",
             "public_key_b64": public_key_b64, "public_key": key,
             "enrolled_at": datetime.now(timezone.utc).isoformat(), "event_times": deque(), "latest_event": None}
+        _remember_privacy_record_locked(_install_id(), "units", unit_id)
         _append_audit_locked("enrolled", "Junction unit key awaiting admin approval", unit_id, junction_id)
     return jsonify({"ok": True, "unit_id": unit_id, "junction_id": junction_id, "status": "pending"}), 201
 
@@ -1391,6 +1520,7 @@ def junction_unit_event():
         event = {**canonical, "event_id": event_id, "received_at": datetime.now(timezone.utc).isoformat(), "verified": True}
         unit["latest_event"] = event
         acoustic_event_registry[event_id] = event
+        _remember_privacy_record_locked(_install_id(), "units", unit_id)
         if len(acoustic_event_registry) > AUTH_CONFIG["MAX_STORED_NONCES"]:
             acoustic_event_registry.pop(next(iter(acoustic_event_registry)))
         controller_heartbeats["input"] = monotonic()
@@ -1497,6 +1627,7 @@ def vehicle_report():
         }
         report["junctions"] = _report_metrics(report, previous)
         vehicle["latest_report"] = report
+        _remember_privacy_record_locked(_install_id(), "vehicles", vehicle_id)
         controller_heartbeats["input"] = monotonic()
         _append_audit_locked("report_verified", "Signed vehicle position accepted", vehicle_id)
 
@@ -1517,17 +1648,88 @@ def vehicle_report():
 @app.get("/api/audit")
 def get_audit_log():
     with lock:
-        previous = "0" * 64
-        valid = True
-        for entry in audit_entries:
-            content = {key: entry[key] for key in ("sequence", "decision", "reason", "vehicle_id", "junction", "timestamp")}
-            serialized = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-            expected = hashlib.sha256((previous + serialized).encode("utf-8")).hexdigest()
-            if entry.get("previous_hash") != previous or entry.get("hash") != expected:
-                valid = False
-                break
-            previous = expected
-    return jsonify({"chain_valid": valid, "entries": audit_entries[-100:]})
+        valid = _audit_chain_valid_locked()
+        entries = audit_entries[-100:]
+    return jsonify({"chain_valid": valid, "entries": entries})
+
+
+@app.get("/api/privacy/summary")
+def privacy_summary():
+    with lock:
+        _purge_retention_locked()
+        positions = sum(bool(vehicle.get("latest_report")) for vehicle in vehicle_registry.values())
+        counts = {
+            "vehicle_position_traces": positions,
+            "acoustic_events": len(acoustic_event_registry),
+            "vehicle_enrollments": len(vehicle_registry),
+            "junction_units": len(junction_unit_registry),
+            "replay_nonces": len(seen_nonces),
+            "audit_entries": len(audit_entries),
+            "audit_positions": sum(entry.get("position") is not None for entry in audit_entries),
+            "aggregated_queue_baselines": len(junctions),
+            "raw_audio_or_recordings": 0,
+            "waveforms_or_spectrograms": 0
+        }
+        chain_valid = _audit_chain_valid_locked()
+    return jsonify({"counts": counts, "retention": dict(RETENTION_CONFIG),
+                    "audit_chain_valid": chain_valid,
+                    "note": "Audit records contain no coordinates; identifiers can be redacted and the chain recomputed."})
+
+
+@app.post("/api/privacy/delete")
+def delete_my_privacy_data():
+    install_id = _install_id()
+    if not install_id:
+        return jsonify({"ok": False, "reason": "A valid random per-install ID is required"}), 400
+    with lock:
+        removed = _delete_install_data_locked(install_id)
+        valid = _audit_chain_valid_locked()
+    return jsonify({"ok": True, "deleted": removed, "audit_entries_kept": True, "audit_chain_valid": valid})
+
+
+@app.get("/api/dev/privacy-self-check")
+def privacy_self_check_endpoint():
+    now = datetime.now(timezone.utc).timestamp()
+    fixture_vehicle, fixture_unit, fixture_install = "privacy-check-vehicle", "privacy-check-unit", "f" * 32
+    with lock:
+        original_audits, original_head = list(audit_entries), audit_head_hash
+        vehicle_registry[fixture_vehicle] = {"latest_report": {"timestamp": now - RETENTION_CONFIG["VEHICLE_POSITION_TRACE_S"] - 2}}
+        junction_unit_registry[fixture_unit] = {"latest_event": {"event_id": "privacy-check-event"}}
+        acoustic_event_registry["privacy-check-event"] = {"unit_id": fixture_unit, "timestamp": now - RETENTION_CONFIG["ACOUSTIC_EVENT_S"] - 2}
+        _purge_retention_locked(now)
+        purge_passed = vehicle_registry[fixture_vehicle]["latest_report"] is None and "privacy-check-event" not in acoustic_event_registry
+        vehicle_registry[fixture_vehicle] = {"latest_report": None}
+        junction_unit_registry[fixture_unit] = {"latest_event": {"event_id": "privacy-check-live"}}
+        acoustic_event_registry["privacy-check-live"] = {"unit_id": fixture_unit, "timestamp": now}
+        seen_nonces[f"{fixture_vehicle}:privacychecknonce"] = now
+        seen_nonces[f"unit:{fixture_unit}:privacychecknonce"] = now
+        privacy_owners[fixture_install] = {"vehicles": {fixture_vehicle}, "units": {fixture_unit}}
+        _append_audit_locked("privacy_test", "Temporary self-check fixture", fixture_vehicle, position={"lat": 13.311234, "lon": 76.941234})
+        audit_entries[-1]["timestamp"] = datetime.fromtimestamp(now - RETENTION_CONFIG["AUDIT_POSITION_REDACT_S"] - 2, timezone.utc).isoformat()
+        _round_expired_audit_positions_locked(now)
+        rounded_position = audit_entries[-1].get("position") or {}
+        rounded_passed = rounded_position.get("precision_m") == 50 and _audit_chain_valid_locked()
+        _delete_install_data_locked(fixture_install)
+        delete_passed = (fixture_vehicle not in vehicle_registry and fixture_unit not in junction_unit_registry and
+                         "privacy-check-live" not in acoustic_event_registry and
+                         f"{fixture_vehicle}:privacychecknonce" not in seen_nonces and
+                         f"unit:{fixture_unit}:privacychecknonce" not in seen_nonces)
+        chain_passed = _audit_chain_valid_locked()
+        audit_entries[:] = original_audits
+        audit_head_hash = original_head
+        privacy_owners.pop(fixture_install, None)
+        vehicle_registry.pop(fixture_vehicle, None)
+        junction_unit_registry.pop(fixture_unit, None)
+        acoustic_event_registry.pop("privacy-check-event", None)
+        acoustic_event_registry.pop("privacy-check-live", None)
+        seen_nonces.pop(f"{fixture_vehicle}:privacychecknonce", None)
+        seen_nonces.pop(f"unit:{fixture_unit}:privacychecknonce", None)
+    return jsonify({"results": [
+        {"name": "Purge expires position and acoustic records", "passed": purge_passed, "expected": "expired records removed", "actual": "removed" if purge_passed else "record remained"},
+        {"name": "Audit positions are rounded after 24 hours", "passed": rounded_passed, "expected": "50 m grid and valid chain", "actual": f"{rounded_position.get('precision_m', 'not rounded')} m grid"},
+        {"name": "Delete my data removes linked device records", "passed": delete_passed, "expected": "vehicle and unit absent", "actual": "removed" if delete_passed else "record remained"},
+        {"name": "Audit chain verifies after redaction", "passed": chain_passed, "expected": "chain valid", "actual": "valid" if chain_passed else "broken"}
+    ]})
 
 
 @app.get("/api/dev/harm-self-check")

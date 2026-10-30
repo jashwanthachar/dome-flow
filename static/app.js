@@ -199,10 +199,119 @@ let allIncidents = [], currentSummary = null, activeFilter = "All";
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
+const PRIVACY_INSTALL_KEY = "dome-flow-privacy-install-id";
+const privacyObservedRequests = [];
+function privacyInstallId() {
+  let id = localStorage.getItem(PRIVACY_INSTALL_KEY);
+  if (!/^[a-f0-9]{32}$/.test(id || "")) {
+    id = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("");
+    localStorage.setItem(PRIVACY_INSTALL_KEY, id);
+  }
+  return id;
+}
+function privacyRequestHeaders(extra = {}) { return { ...extra, "X-Privacy-Install-ID": privacyInstallId() }; }
+function recordPrivacyPayload(url, method, body) {
+  if (!body) return;
+  let parsed;
+  try { parsed = typeof body === "string" ? JSON.parse(body) : body; } catch { parsed = "Non-JSON body omitted"; }
+  const hasAudioData = payloadHasAudioData(parsed);
+  const fieldNames = parsed && typeof parsed === "object" ? Object.keys(parsed) : [];
+  privacyObservedRequests.push({ method, url, hasAudioData, fieldNames });
+  if (privacyObservedRequests.length > 100) privacyObservedRequests.shift();
+  const viewer = $("#privacy-last-payload");
+  if (viewer) viewer.textContent = JSON.stringify({ method, url, header: "X-Privacy-Install-ID", payload: parsed }, null, 2);
+}
+function roundLocationToGrid(lat, lon, gridMeters = 50) {
+  const latStep = gridMeters / 111320;
+  const lonStep = gridMeters / (111320 * Math.max(Math.cos(Number(lat) * Math.PI / 180), 0.01));
+  return { lat: Number((Math.round(Number(lat) / latStep) * latStep).toFixed(6)),
+    lon: Number((Math.round(Number(lon) / lonStep) * lonStep).toFixed(6)) };
+}
+function payloadHasAudioData(value, key = "") {
+  if (/(raw.?audio|audio.?data|samples|waveform|spectrogram|recording|pcm|microphone.?buffer)/i.test(key)) return true;
+  if (Array.isArray(value)) return value.length > 32 && value.every(item => typeof item === "number");
+  if (value && typeof value === "object") return Object.entries(value).some(([childKey, child]) => payloadHasAudioData(child, childKey));
+  const longBase64 = typeof value === "string" && value.length > 512 && /^[A-Za-z0-9+/=]+$/.test(value);
+  const expectedCryptoField = /(signature|public_key)/i.test(key) && typeof value === "string" && value.length <= 512;
+  return longBase64 && !expectedCryptoField;
+}
+function stopAudioTracks(stream) {
+  stream?.getTracks?.().forEach(track => track.stop());
+}
+
+async function clearLocalKeyStore(dbName, storeName) {
+  await new Promise(resolve => {
+    const open = indexedDB.open(dbName);
+    open.onsuccess = () => {
+      const db = open.result;
+      if (!db.objectStoreNames.contains(storeName)) { db.close(); return resolve(); }
+      const tx = db.transaction(storeName, "readwrite"); tx.objectStore(storeName).clear();
+      tx.oncomplete = tx.onerror = () => { db.close(); resolve(); };
+    };
+    open.onerror = resolve;
+  });
+}
+async function deleteThisDeviceData(resetId = false) {
+  const installId = privacyInstallId();
+  if (isMicActive) withdrawMicConsent();
+  const response = await api("/api/privacy/delete", { method: "POST", headers: privacyRequestHeaders(), body: JSON.stringify({}) });
+  await Promise.all([clearLocalKeyStore("dome-flow-junction-unit-keys", "units"), clearLocalKeyStore("dome-flow-vehicle-keys", "vehicles")]);
+  if (resetId) localStorage.setItem(PRIVACY_INSTALL_KEY, Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join(""));
+  if ($("#privacy-install-id")) $("#privacy-install-id").textContent = resetId ? "Reset to a new random ID" : `${installId.slice(0, 8)}…`;
+  if ($("#privacy-status")) $("#privacy-status").textContent = `Deleted linked records: ${JSON.stringify(response.deleted)}. Audit entries retained with identifiers redacted.`;
+  await refreshDualKeyData();
+  await refreshPrivacySummary();
+}
+
+async function refreshPrivacySummary() {
+  const result = await api("/api/privacy/summary", { headers: privacyRequestHeaders() });
+  if ($("#privacy-retention-status")) {
+    const c = result.counts;
+    $("#privacy-retention-status").textContent = `Position traces: ${c.vehicle_position_traces} (24 h) · Acoustic events: ${c.acoustic_events} (7 days) · Queue baselines: junction aggregates only · Audit entries: ${c.audit_entries} kept / ${c.audit_positions} rounded positions · Raw audio: 0 · Chain: ${result.audit_chain_valid ? "valid" : "BROKEN"}`;
+  }
+  return result;
+}
+
+async function runPrivacySelfCheck() {
+  console.group("Privacy controls self-check");
+  const payloadsPassed = privacyObservedRequests.every(item => !item.hasAudioData);
+  console[payloadsPassed ? "log" : "error"](`${payloadsPassed ? "PASS" : "FAIL"} Outgoing payload inspection: expected no audio fields/sample arrays, actual ${privacyObservedRequests.length} captured payload(s)`);
+  const consentPassed = !canStartMicrophone("denied") && !canStartMicrophone("unknown");
+  console[consentPassed ? "log" : "error"](`${consentPassed ? "PASS" : "FAIL"} Microphone consent gate: expected no start until granted, actual ${consentPassed ? "blocked" : "start allowed"}`);
+  let stoppedTrack = false;
+  stopAudioTracks({ getTracks: () => [{ stop: () => { stoppedTrack = true; } }] });
+  console[stoppedTrack ? "log" : "error"](`${stoppedTrack ? "PASS" : "FAIL"} Withdrawal stop primitive: expected active audio tracks stopped, actual ${stoppedTrack ? "stopped" : "still active"}`);
+  const rounded = roundLocationToGrid(13.311234, 76.941234, 50);
+  const latStep = 50 / 111320, lonStep = 50 / (111320 * Math.cos(13.311234 * Math.PI / 180));
+  const gridPassed = Math.abs(rounded.lat / latStep - Math.round(rounded.lat / latStep)) < 0.01 &&
+    Math.abs(rounded.lon / lonStep - Math.round(rounded.lon / lonStep)) < 0.01;
+  console[gridPassed ? "log" : "error"](`${gridPassed ? "PASS" : "FAIL"} Non-emergency location grid: expected approximately 50 m, actual ${JSON.stringify(rounded)}`);
+  try {
+    const server = await api("/api/dev/privacy-self-check", { headers: privacyRequestHeaders() });
+    for (const item of server.results || []) console[item.passed ? "log" : "error"](`${item.passed ? "PASS" : "FAIL"} ${item.name}: expected ${item.expected}, actual ${item.actual}`);
+    const pass = payloadsPassed && consentPassed && stoppedTrack && gridPassed && (server.results || []).every(item => item.passed);
+    if ($("#privacy-status")) $("#privacy-status").textContent = pass ? "Privacy self-check passed. See browser console." : "Privacy self-check found an issue. See browser console.";
+    return pass;
+  } catch (error) { console.error("FAIL server retention/deletion checks", error); return false; }
+  finally { console.groupEnd(); }
+}
+window.runPrivacySelfCheck = runPrivacySelfCheck;
+
+function initPrivacyControls() {
+  if ($("#privacy-install-id")) $("#privacy-install-id").textContent = `${privacyInstallId().slice(0, 8)}…`;
+  $("#privacy-refresh")?.addEventListener("click", () => refreshPrivacySummary().catch(error => { $("#privacy-status").textContent = error.message; }));
+  $("#privacy-delete")?.addEventListener("click", () => { if (confirm("Delete this browser install's linked vehicle and junction-unit records? Audit entries will remain with identifiers removed.")) deleteThisDeviceData().catch(error => { $("#privacy-status").textContent = error.message; }); });
+  $("#privacy-reset-id")?.addEventListener("click", () => { if (confirm("Delete linked server records and local keys, then create a new random install ID?")) deleteThisDeviceData(true).catch(error => { $("#privacy-status").textContent = error.message; }); });
+  $("#privacy-self-check")?.addEventListener("click", runPrivacySelfCheck);
+  refreshPrivacySummary().catch(() => {});
+}
+
 async function api(url, options = {}) {
+  const method = options.method || "GET";
+  recordPrivacyPayload(url, method, options.body);
   const r = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
-    ...options
+    ...options,
+    headers: privacyRequestHeaders({ "Content-Type": "application/json", ...(options.headers || {}) })
   });
   const data = await r.json();
   if (!r.ok) {
@@ -943,14 +1052,19 @@ async function triggerPreemptionOverride(sirenEvent) {
   const bikes = parseInt($("#preempt-bikes")?.value || 22);
   const vehicle_id = $("#verified-vehicle")?.value || "";
   const event = sirenEvent || { confirmed: false, label: "none", confidence: 0 };
-  if (event.stage !== "confirmed" || !event.confirmed) return;
+  if (event.stage !== "confirmed" || !event.confirmed || !canStartMicrophone()) return;
   const siren_confidence = Math.max(0, Math.min(1, Number(event.confidence) || 0));
 
   preemptionRequestPending = true;
+  const consentEpoch = micConsentEpoch;
+  privacyAudioAbortController = new AbortController();
+  const privacySignal = privacyAudioAbortController.signal;
   try {
-    const unit_event_id = await postSignedAcousticEvent(event, junction_id);
+    const unit_event_id = await postSignedAcousticEvent(event, junction_id, privacySignal);
+    if (consentEpoch !== micConsentEpoch || !canStartMicrophone()) return;
     const res = await api("/api/preempt/trigger", {
       method: "POST",
+      signal: privacySignal,
       body: JSON.stringify({
         junction_id,
         cars,
@@ -1009,6 +1123,7 @@ async function triggerPreemptionOverride(sirenEvent) {
     if ($("#dual-key-status")) $("#dual-key-status").textContent = `${err.data?.decision || "DENIED"}: ${err.message}`;
     toast(err.message || "Could not trigger emergency preemption");
   } finally {
+    if (privacyAudioAbortController?.signal === privacySignal) privacyAudioAbortController = null;
     preemptionRequestPending = false;
   }
 }
@@ -1031,6 +1146,59 @@ let sirenLabel = "none";
 let sirenHistory = [];
 let sirenFloatData = null;
 let sirenByteData = null;
+const MIC_CONSENT_KEY = "dome-flow-microphone-consent";
+let micConsentResolver = null;
+let micConsentEpoch = 0;
+let privacyAudioAbortController = null;
+
+function readMicConsent() {
+  try { return JSON.parse(localStorage.getItem(MIC_CONSENT_KEY) || "null") || { status: "unknown", timestamp: null }; }
+  catch { return { status: "unknown", timestamp: null }; }
+}
+function canStartMicrophone(status = readMicConsent().status) { return status === "granted"; }
+function storeMicConsent(status) {
+  localStorage.setItem(MIC_CONSENT_KEY, JSON.stringify({ status, timestamp: new Date().toISOString() }));
+  if ($("#mic-consent-state")) $("#mic-consent-state").textContent = `Consent ${status} · ${new Date().toLocaleString()}`;
+}
+function updateMicPrivacyIndicator() {
+  const indicator = $("#mic-privacy-indicator");
+  if (!indicator) return;
+  indicator.hidden = !isMicActive;
+  indicator.textContent = isMicActive ? "MIC ACTIVE · audio analyzed on this device only" : "MICROPHONE OFF";
+}
+function requestMicConsent() {
+  if (canStartMicrophone()) return Promise.resolve(true);
+  const dialog = $("#siren-consent-dialog");
+  if (!dialog) return Promise.resolve(false);
+  if (typeof dialog.showModal === "function") dialog.showModal();
+  else dialog.setAttribute("open", "");
+  return new Promise(resolve => { micConsentResolver = resolve; });
+}
+function withdrawMicConsent() {
+  micConsentEpoch += 1;
+  if (privacyAudioAbortController) privacyAudioAbortController.abort();
+  privacyAudioAbortController = null;
+  storeMicConsent("denied");
+  stopMic();
+  if ($("#privacy-status")) $("#privacy-status").textContent = "Microphone consent withdrawn; audio input stopped and further acoustic-event requests are blocked.";
+}
+function initMicConsentControls() {
+  const dialog = $("#siren-consent-dialog");
+  const finish = granted => {
+    storeMicConsent(granted ? "granted" : "denied");
+    if (dialog?.open) dialog.close();
+    if (micConsentResolver) micConsentResolver(granted);
+    micConsentResolver = null;
+  };
+  $("#mic-consent-accept")?.addEventListener("click", () => finish(true));
+  $("#mic-consent-deny")?.addEventListener("click", () => finish(false));
+  dialog?.addEventListener("cancel", event => { event.preventDefault(); finish(false); });
+  $("#mic-consent-withdraw")?.addEventListener("click", withdrawMicConsent);
+  const consent = readMicConsent();
+  if ($("#mic-consent-state")) $("#mic-consent-state").textContent = consent.timestamp
+    ? `Consent ${consent.status} · ${new Date(consent.timestamp).toLocaleString()}` : "No microphone consent recorded";
+  updateMicPrivacyIndicator();
+}
 
 const sirenDetector = {
   state: "IDLE",
@@ -1487,6 +1655,7 @@ async function toggleMic() {
     stopMic();
     return;
   }
+  if (!await requestMicConsent() || !canStartMicrophone()) return;
   try {
     ensureSirenAnalyser();
     if (audioCtx.state === "suspended") await audioCtx.resume();
@@ -1500,6 +1669,7 @@ async function toggleMic() {
         sirenTestMode = false;
         isMicActive = true;
         resetSirenDetector();
+        updateMicPrivacyIndicator();
         if ($("#btn-mic-toggle")) $("#btn-mic-toggle").textContent = "Stop Live Mic";
         toast("Live microphone analysis active. Audio stays in this browser.");
         return;
@@ -1525,11 +1695,9 @@ function stopMic() {
   channelSplitter = leftChannelAnalyser = rightChannelAnalyser = null;
   leftChannelData = rightChannelData = null;
   stereoHint = "—";
-  if (micStream) {
-    micStream.getTracks().forEach(track => track.stop());
-    micStream = null;
-  }
+  if (micStream) { stopAudioTracks(micStream); micStream = null; }
   isMicActive = false;
+  updateMicPrivacyIndicator();
   sirenAudioMode = "idle";
   sirenTestMode = false;
   resetSirenDetector();
@@ -1568,7 +1736,7 @@ function saveJunctionKey(record) {
 const canonicalSignedJson = data => JSON.stringify(Object.fromEntries(Object.keys(data).sort().map(key => [key, data[key]])));
 const randomNonce = () => bytesToBase64(crypto.getRandomValues(new Uint8Array(18))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
-async function enrollJunctionUnit(junctionId) {
+async function enrollJunctionUnit(junctionId, signal) {
   if (!junctionUnitDb) await openJunctionUnitDb();
   let keyRecord = await readJunctionKey(junctionId);
   if (!keyRecord) {
@@ -1577,14 +1745,14 @@ async function enrollJunctionUnit(junctionId) {
     await saveJunctionKey(keyRecord);
   }
   const publicKey = bytesToBase64(await crypto.subtle.exportKey("spki", keyRecord.publicKey));
-  const enrollment = await api("/api/unit/enroll", { method: "POST", body: JSON.stringify({ unit_id: keyRecord.unit_id, junction_id: junctionId, public_key: publicKey }) });
+  const enrollment = await api("/api/unit/enroll", { method: "POST", body: JSON.stringify({ unit_id: keyRecord.unit_id, junction_id: junctionId, public_key: publicKey }), signal });
   if ($("#junction-unit-status")) $("#junction-unit-status").textContent = `${keyRecord.unit_id}: ${enrollment.status}. Admin approval is required.`;
-  await refreshDualKeyData();
   return keyRecord;
 }
 
-async function postSignedAcousticEvent(event, junctionId) {
-  const keyRecord = await enrollJunctionUnit(junctionId);
+async function postSignedAcousticEvent(event, junctionId, signal) {
+  const keyRecord = await enrollJunctionUnit(junctionId, signal);
+  if (signal?.aborted || !canStartMicrophone()) throw new Error("Acoustic sending stopped because microphone consent is not active.");
   const payload = {
     unit_id: keyRecord.unit_id, junction_id: junctionId,
     timestamp: Math.floor(Date.now() / 1000), nonce: randomNonce(),
@@ -1595,7 +1763,7 @@ async function postSignedAcousticEvent(event, junctionId) {
   };
   const signature = bytesToBase64(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, keyRecord.privateKey,
     new TextEncoder().encode(canonicalSignedJson(payload))));
-  const result = await api("/api/unit/event", { method: "POST", body: JSON.stringify({ ...payload, signature }) });
+  const result = await api("/api/unit/event", { method: "POST", body: JSON.stringify({ ...payload, signature }), signal });
   return result.event_id;
 }
 
@@ -1610,10 +1778,14 @@ function pointAtDistance(distanceM, headingDeg) {
 async function createAttackVehicle(vehicleId) {
   const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
   const pub = bytesToBase64(await crypto.subtle.exportKey("spki", pair.publicKey));
-  const enrolled = await fetch("/api/vehicle/enroll", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vehicle_id: vehicleId, public_key: pub }) }).then(r => r.json());
+  const enrollBody = JSON.stringify({ vehicle_id: vehicleId, public_key: pub });
+  recordPrivacyPayload("/api/vehicle/enroll", "POST", enrollBody);
+  const enrolled = await fetch("/api/vehicle/enroll", { method: "POST", headers: privacyRequestHeaders({ "Content-Type": "application/json" }), body: enrollBody }).then(r => r.json());
   if (!enrolled.ok) throw Error(enrolled.reason);
   const admin = $("#admin-token")?.value || "";
-  const approval = await fetch(`/api/dev/vehicle/${encodeURIComponent(vehicleId)}/status`, { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Token": admin }, body: JSON.stringify({ status: "approved" }) }).then(async r => ({ ok: r.ok, data: await r.json() }));
+  const approvalBody = JSON.stringify({ status: "approved" });
+  recordPrivacyPayload(`/api/dev/vehicle/${vehicleId}/status`, "POST", approvalBody);
+  const approval = await fetch(`/api/dev/vehicle/${encodeURIComponent(vehicleId)}/status`, { method: "POST", headers: privacyRequestHeaders({ "Content-Type": "application/json", "X-Admin-Token": admin }), body: approvalBody }).then(async r => ({ ok: r.ok, data: await r.json() }));
   if (!approval.ok) throw Error(approval.data.reason);
   return { vehicleId, privateKey: pair.privateKey };
 }
@@ -1648,7 +1820,9 @@ async function signedAttackAcoustic(fixture, junctionId = fixture.junctionId) {
 }
 
 async function attackPost(url, body, headers = {}) {
-  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
+  const bodyText = JSON.stringify(body);
+  recordPrivacyPayload(url, "POST", bodyText);
+  const response = await fetch(url, { method: "POST", headers: privacyRequestHeaders({ "Content-Type": "application/json", ...headers }), body: bodyText });
   const data = await response.json().catch(() => ({}));
   return { ok: response.ok, status: response.status, ...data };
 }
@@ -1713,7 +1887,8 @@ async function runDualKeyAttack(name) {
 }
 
 async function refreshDualKeyData() {
-  const [vehicles, units, audit] = await Promise.all([fetch("/api/vehicles").then(r => r.json()), fetch("/api/units").then(r => r.json()), fetch("/api/audit").then(r => r.json())]);
+  const requestHeaders = privacyRequestHeaders();
+  const [vehicles, units, audit] = await Promise.all([fetch("/api/vehicles", { headers: requestHeaders }).then(r => r.json()), fetch("/api/units", { headers: requestHeaders }).then(r => r.json()), fetch("/api/audit", { headers: requestHeaders }).then(r => r.json())]);
   latestVerifiedVehicleReports = Object.fromEntries(vehicles.vehicles
     .filter(vehicle => vehicle.status === "approved" && vehicle.junctions)
     .map(vehicle => [vehicle.vehicle_id, vehicle.junctions]));
@@ -1739,7 +1914,7 @@ function initDualKeyTools(panel, enabled) {
   panel.querySelectorAll("[data-attack]").forEach(button => button.addEventListener("click", () => runDualKeyAttack(button.dataset.attack).catch(error => { console.error(error); toast(error.message); })));
   $("#vehicle-refresh")?.addEventListener("click", refreshDualKeyData);
   $("#junction-unit-enroll")?.addEventListener("click", async () => {
-    try { await enrollJunctionUnit($("#preempt-junction")?.value || "J2"); }
+    try { await enrollJunctionUnit($("#preempt-junction")?.value || "J2"); await refreshDualKeyData(); }
     catch (error) { if ($("#junction-unit-status")) $("#junction-unit-status").textContent = error.message; }
   });
   $("#attack-self-check")?.addEventListener("click", async () => {
@@ -2008,6 +2183,8 @@ function initModuleA() {
   if ($("#btn-mic-toggle")) $("#btn-mic-toggle").onclick = toggleMic;
 
   initFFTCanvas();
+  initMicConsentControls();
+  initPrivacyControls();
   initSirenTestPanel();
   updateLiveMath();
 }
