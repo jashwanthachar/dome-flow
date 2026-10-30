@@ -2696,7 +2696,8 @@ footer span {
   height: 8px;
   background: rgba(255, 255, 255, 0.1);
   border-radius: 4px;
-  margin-bottom: 18px;
+  margin-top: 24px;
+  margin-bottom: 24px;
 }
 .chainage-fill {
   position: absolute;
@@ -2710,13 +2711,19 @@ footer span {
 }
 .chainage-pin {
   position: absolute;
-  top: -6px;
+  top: -5px;
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   align-items: center;
   cursor: pointer;
   z-index: 2;
+}
+.chainage-pin.pin-tumakuru {
+  transform: translateX(0%);
+}
+.chainage-pin.pin-nittur {
+  transform: translateX(-100%);
 }
 .chainage-pin .pin-dot {
   width: 18px;
@@ -2735,14 +2742,37 @@ footer span {
   border-color: #fde68a;
 }
 .chainage-pin small {
-  margin-top: 5px;
+  margin-top: 6px;
   font-size: 10px;
+  font-weight: 600;
   white-space: nowrap;
   color: #e2e8f0;
-  background: rgba(15, 23, 42, 0.85);
-  padding: 1px 5px;
+  background: rgba(15, 23, 42, 0.9);
+  padding: 2px 6px;
   border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+/* Stagger overlapping labels near 19.0 - 19.5 km */
+.chainage-pin.stagger-above small {
+  position: absolute;
+  bottom: 24px;
+  margin-top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.chainage-pin.stagger-above small::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 4px 4px 0 4px;
+  border-style: solid;
+  border-color: rgba(15, 23, 42, 0.9) transparent transparent transparent;
+}
+.chainage-pin.stagger-below small {
+  margin-top: 6px;
 }
 .ruler-ticks {
   display: flex;

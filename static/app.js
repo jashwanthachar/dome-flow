@@ -671,12 +671,15 @@ function switchView(id) {
   };
   $("#pageTitle").innerHTML = `${titles[id] || "DOME Flow"} <span>✦</span>`;
   window.scrollTo({ top: 0, behavior: "smooth" });
-  if (id === "corridor-map" || id === "overview") {
+
+  if (id === "corridor-map") {
     setTimeout(() => {
-      if (typeof corridorLeafletMap !== "undefined" && corridorLeafletMap) {
-        corridorLeafletMap.invalidateSize();
-      }
-    }, 200);
+      fitMapToCorridor(corridorDedicatedMap);
+    }, 150);
+  } else if (id === "overview") {
+    setTimeout(() => {
+      fitMapToCorridor(corridorLeafletMap);
+    }, 150);
   }
 }
 
@@ -2443,6 +2446,27 @@ let corridorRoadLayers = [];
 let corridorJunctionMarkers = {};
 let corridorDataCache = null;
 
+function fitMapToCorridor(map) {
+  if (!map) return;
+  map.invalidateSize();
+  const roadLayer = map._roadLayer;
+  if (roadLayer && typeof roadLayer.getBounds === "function") {
+    const bounds = roadLayer.getBounds();
+    if (bounds && bounds.isValid()) {
+      map.fitBounds(bounds, { padding: [25, 25] });
+    }
+  }
+}
+
+window.addEventListener("resize", () => {
+  const activeView = document.querySelector(".view.active")?.id;
+  if (activeView === "corridor-map") {
+    fitMapToCorridor(corridorDedicatedMap);
+  } else if (activeView === "overview") {
+    fitMapToCorridor(corridorLeafletMap);
+  }
+});
+
 function setupSingleLeafletMap(containerId, res) {
   const container = document.getElementById(containerId);
   if (!container || typeof L === "undefined") return null;
@@ -2478,6 +2502,7 @@ function setupSingleLeafletMap(containerId, res) {
         lineJoin: "round"
       })
     }).addTo(map);
+    map._roadLayer = roadLayer;
     corridorRoadLayers.push(roadLayer);
 
     if (roadLayer.getBounds().isValid()) {
@@ -2539,6 +2564,15 @@ async function initCorridorMap() {
         openJunctionFromMap(pin.dataset.junction);
       };
     });
+
+    setTimeout(() => {
+      const activeView = document.querySelector(".view.active")?.id;
+      if (activeView === "corridor-map") {
+        fitMapToCorridor(corridorDedicatedMap);
+      } else if (activeView === "overview") {
+        fitMapToCorridor(corridorLeafletMap);
+      }
+    }, 200);
 
   } catch (err) {
     console.error("Failed to initialize corridor map:", err);
