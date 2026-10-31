@@ -306,6 +306,45 @@
       </div>
       <div class="simulation-banner" id="controller-simulation-banner">SIMULATION, NOT CONNECTED TO REAL SIGNALS</div>
 
+      <!-- Judge Evaluation: Threat Scenarios Card -->
+      <div class="panel glass threat-eval-card" id="threat-eval-panel" style="margin-bottom: 20px; border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.37);">
+        <div class="panel-heading" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+          <div>
+            <div class="section-kicker" style="color:#38bdf8; font-weight:800; letter-spacing:1px;">HACKATHON JUDGE EVALUATION</div>
+            <h3 style="margin:2px 0; display:flex; align-items:center; gap:8px;">
+              <span>⚖️ THREAT SCENARIOS: Vulnerable vs Secured AURA</span>
+            </h3>
+            <p class="muted" style="margin:2px 0 0; font-size:12px;">
+              Physically test attack scenarios: Siren audio spoofing &amp; fake phone shakes. Toggle between a naive vulnerable system and AURA's zero-trust verified pipeline.
+            </p>
+          </div>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div class="eval-mode-toggle" style="background:#090d16; border:1px solid #334155; border-radius:30px; padding:4px; display:inline-flex; align-items:center; gap:4px;">
+              <button type="button" id="btn-mode-vulnerable" class="mode-pill" style="border:none; background:transparent; color:#94a3b8; font-size:11px; font-weight:700; padding:6px 14px; border-radius:20px; cursor:pointer; transition:all 0.2s;">
+                ⚠️ VULNERABLE MODE (Spoofing Allowed)
+              </button>
+              <button type="button" id="btn-mode-secured" class="mode-pill active" style="border:none; background:#10b981; color:#ffffff; font-size:11px; font-weight:700; padding:6px 14px; border-radius:20px; cursor:pointer; transition:all 0.2s;">
+                🛡️ ENTERPRISE SECURED (Dual-Key &amp; Dedupe)
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="eval-controls-row" style="margin-top:14px; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; background:rgba(15, 23, 42, 0.6); padding:12px 16px; border-radius:10px; border:1px solid rgba(255,255,255,0.06);">
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <button type="button" id="btn-simulate-shake" class="secondary-btn" style="background:#1e293b; color:#38bdf8; border:1px solid #38bdf8; font-size:12px; font-weight:700; padding:8px 16px; display:inline-flex; align-items:center; gap:6px;">
+              📱 Simulate Phone Shake (<span id="shake-hit-counter">0</span>/3 Hits)
+            </button>
+            <span id="threat-eval-hint" style="font-size:11px; color:#cbd5e1;">
+              Current Mode: <b id="current-mode-label" style="color:#10b981;">ENTERPRISE SECURED</b> — Shakes &amp; sirens require speed &gt; 15 km/h and ECDSA crypto tokens.
+            </span>
+          </div>
+          <div id="threat-eval-alert-pill" style="font-size:11px; font-weight:800; padding:6px 14px; border-radius:6px; background:#020617; border:1px solid #334155; color:#94a3b8; transition:all 0.3s ease;">
+            STATUS: Ready for test
+          </div>
+        </div>
+      </div>
+
       <div class="s2-command-grid">
         <!-- Left Column: Module A -->
         <div class="panel glass s2-module-card">

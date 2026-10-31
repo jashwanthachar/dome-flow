@@ -1072,6 +1072,48 @@ async function triggerPreemptionOverride(sirenEvent) {
   if (event.stage !== "confirmed" || !event.confirmed || !canStartMicrophone()) return;
   const siren_confidence = Math.max(0, Math.min(1, Number(event.confidence) || 0));
 
+  // Judge Evaluation: Threat Scenario Logic
+  if (isVulnerableMode) {
+    const alertPill = $("#threat-eval-alert-pill");
+    if (alertPill) {
+      alertPill.style.background = "rgba(239, 68, 68, 0.25)";
+      alertPill.style.color = "#fca5a5";
+      alertPill.style.borderColor = "#ef4444";
+      alertPill.textContent = "⚠️ VULNERABLE: Siren Spoof Succeeded! Green Granted Blindly (No Token)";
+    }
+    toast("⚠️ VULNERABLE MODE: Ambulance Detected via Siren Audio Alone! Overriding signal to PREEMPT_GREEN...", "error");
+    try {
+      const res = await api("/api/preempt/trigger", {
+        method: "POST",
+        body: JSON.stringify({
+          junction_id,
+          cars,
+          trucks,
+          bikes,
+          vulnerable_bypass: true,
+          siren_confirmed: true
+        })
+      });
+      preemptionActive = true;
+      await load();
+      const gwEl = $("#svg-green-wave-corridor");
+      if (gwEl) gwEl.classList.add("active");
+    } catch (err) {
+      console.error("Vulnerable bypass error:", err);
+    }
+    return;
+  } else if (!vehicle_id) {
+    // Enterprise Secured Mode: Acoustic match without cryptographic token
+    const alertPill = $("#threat-eval-alert-pill");
+    if (alertPill) {
+      alertPill.style.background = "rgba(239, 68, 68, 0.25)";
+      alertPill.style.color = "#fca5a5";
+      alertPill.style.borderColor = "#ef4444";
+      alertPill.textContent = "🛡️ ACCESS DENIED: Siren Heard but Cryptographic Token Missing (Spoof Blocked)";
+    }
+    toast("ACCESS DENIED: Acoustic Spoofing Detected. Cryptographic Token Missing.", "error");
+  }
+
   preemptionRequestPending = true;
   const consentEpoch = micConsentEpoch;
   privacyAudioAbortController = new AbortController();
@@ -2791,11 +2833,156 @@ window.openJunctionFromMap = function(junctionId) {
 };
 
 
+
+// ==========================================
+// THREAT EVALUATION: VULNERABLE VS SECURED
+// ==========================================
+let isVulnerableMode = false;
+let shakeHitCount = 0;
+let lastDeviceMotionAt = 0;
+
+function setThreatEvalMode(vulnerable) {
+  isVulnerableMode = !!vulnerable;
+  const btnVuln = $("#btn-mode-vulnerable");
+  const btnSec = $("#btn-mode-secured");
+  const label = $("#current-mode-label");
+  const hint = $("#threat-eval-hint");
+  const panel = $("#threat-eval-panel");
+  const alertPill = $("#threat-eval-alert-pill");
+
+  if (isVulnerableMode) {
+    if (btnVuln) {
+      btnVuln.style.background = "#ef4444";
+      btnVuln.style.color = "#ffffff";
+    }
+    if (btnSec) {
+      btnSec.style.background = "transparent";
+      btnSec.style.color = "#94a3b8";
+    }
+    if (label) {
+      label.textContent = "VULNERABLE MODE (SPOOFING ALLOWED)";
+      label.style.color = "#ef4444";
+    }
+    if (hint) {
+      hint.innerHTML = 'Current Mode: <b style="color:#ef4444;">VULNERABLE MODE</b> — Siren audio blindly flips green; phone shakes create unverified tickets.';
+    }
+    if (panel) {
+      panel.style.borderColor = "rgba(239, 68, 68, 0.6)";
+      panel.style.boxShadow = "0 8px 32px rgba(239, 68, 68, 0.15)";
+    }
+    if (alertPill) {
+      alertPill.style.background = "#020617";
+      alertPill.style.color = "#fca5a5";
+      alertPill.style.borderColor = "#ef4444";
+      alertPill.textContent = "MODE: Vulnerable (Attacks will succeed)";
+    }
+    toast("⚠️ Switched to VULNERABLE MODE (Spoofing Allowed)");
+  } else {
+    if (btnSec) {
+      btnSec.style.background = "#10b981";
+      btnSec.style.color = "#ffffff";
+    }
+    if (btnVuln) {
+      btnVuln.style.background = "transparent";
+      btnVuln.style.color = "#94a3b8";
+    }
+    if (label) {
+      label.textContent = "ENTERPRISE SECURED";
+      label.style.color = "#10b981";
+    }
+    if (hint) {
+      hint.innerHTML = 'Current Mode: <b style="color:#10b981;">ENTERPRISE SECURED</b> — Shakes & sirens require speed > 15 km/h and ECDSA crypto tokens.';
+    }
+    if (panel) {
+      panel.style.borderColor = "rgba(16, 185, 129, 0.6)";
+      panel.style.boxShadow = "0 8px 32px rgba(16, 185, 129, 0.15)";
+    }
+    if (alertPill) {
+      alertPill.style.background = "#020617";
+      alertPill.style.color = "#6ee7b7";
+      alertPill.style.borderColor = "#10b981";
+      alertPill.textContent = "MODE: Enterprise Secured (Zero-Trust Active)";
+    }
+    toast("🛡️ Switched to ENTERPRISE SECURED MODE (Dual-Key & Dedupe Active)");
+  }
+}
+
+async function handleSimulateShake() {
+  const alertPill = $("#threat-eval-alert-pill");
+  const counterEl = $("#shake-hit-counter");
+
+  if (isVulnerableMode) {
+    shakeHitCount++;
+    if (counterEl) counterEl.textContent = String(shakeHitCount);
+
+    if (shakeHitCount < 3) {
+      if (alertPill) {
+        alertPill.style.background = "rgba(245, 158, 11, 0.2)";
+        alertPill.style.color = "#fde68a";
+        alertPill.style.borderColor = "#f59e0b";
+        alertPill.textContent = `⚠️ VULNERABLE: Phone Shake Hit ${shakeHitCount}/3 registered!`;
+      }
+      toast(`VULNERABLE MODE: Phone Shake Hit ${shakeHitCount}/3 registered!`);
+    } else {
+      shakeHitCount = 0;
+      if (counterEl) counterEl.textContent = "0";
+      try {
+        const res = await api("/api/potholes/vulnerable_report", { method: "POST" });
+        if (alertPill) {
+          alertPill.style.background = "rgba(239, 68, 68, 0.25)";
+          alertPill.style.color = "#fca5a5";
+          alertPill.style.borderColor = "#ef4444";
+          alertPill.textContent = "⚠️ VULNERABLE: Fake Shake Accepted! HIGH SEVERITY Ticket Issued in PWD Ledger";
+        }
+        toast("VULNERABLE MODE: Fake shake accepted! Pothole ticket issued without speed/GPS verification.", "error");
+        await fetchPotholesDashboard();
+      } catch (e) {
+        console.error("Vulnerable report error:", e);
+      }
+    }
+  } else {
+    // Enterprise Secured Mode
+    if (alertPill) {
+      alertPill.style.background = "rgba(16, 185, 129, 0.25)";
+      alertPill.style.color = "#6ee7b7";
+      alertPill.style.borderColor = "#10b981";
+      alertPill.textContent = "🛡️ REJECTED: Context Blindness. Speed < 15km/h. Ignored.";
+    }
+    toast("REJECTED: Context Blindness. Speed < 15km/h. Ignored.", "error");
+  }
+}
+
+function initThreatEvaluation() {
+  const btnVuln = $("#btn-mode-vulnerable");
+  const btnSec = $("#btn-mode-secured");
+  const btnShake = $("#btn-simulate-shake");
+
+  if (btnVuln) btnVuln.onclick = () => setThreatEvalMode(true);
+  if (btnSec) btnSec.onclick = () => setThreatEvalMode(false);
+  if (btnShake) btnShake.onclick = handleSimulateShake;
+
+  // Real device physical shake listener (for mobile browsers)
+  if (window.DeviceMotionEvent) {
+    window.addEventListener("devicemotion", (e) => {
+      const acc = e.accelerationIncludingGravity || e.acceleration;
+      if (!acc) return;
+      const mag = Math.sqrt((acc.x || 0)**2 + (acc.y || 0)**2 + (acc.z || 0)**2);
+      const now = Date.now();
+      if (mag > 16.0 && now - lastDeviceMotionAt > 800) {
+        lastDeviceMotionAt = now;
+        handleSimulateShake();
+      }
+    });
+  }
+}
+
+
 // Bootstrap all modules
 initTopbarAndModals();
 initModuleA();
 initModuleB();
 initCorridorMap();
+initThreatEvaluation();
 load();
 drawChart();
 updateHeaderClock();

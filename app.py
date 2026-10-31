@@ -2098,6 +2098,21 @@ def trigger_preempt():
             reason = "Unknown target junction"
             _append_audit_locked("denied", reason, vehicle_id, junction_id)
             return jsonify({"ok": False, "decision": "DENIED", "reason": reason}), 400
+
+        vulnerable_bypass = payload.get("vulnerable_bypass") is True
+        if vulnerable_bypass:
+            target_j["signal_state"] = "PREEMPT_GREEN"
+            for other_j in junctions:
+                if other_j["id"] != junction_id:
+                    other_j["signal_state"] = "GREEN_WAVE_STANDBY"
+            _append_audit_locked("vulnerable_granted", "VULNERABLE MODE: Blind siren audio override granted without ECDSA token", None, junction_id)
+            return jsonify({
+                "ok": True,
+                "decision": "GRANTED",
+                "reason": "VULNERABLE MODE: Siren audio alone triggered emergency green wave! (No cryptographic verification)",
+                "t_flush_sec": 12.0,
+                "t_flush_high_sec": 18.0
+            }), 200
         if controller_fail_safe["active"]:
             reason = "FAIL-SAFE ACTIVE: controller inputs are stale; no preemption action is allowed"
             _append_audit_locked("denied", reason, vehicle_id, junction_id)
@@ -3208,6 +3223,46 @@ def partner_alerts_ahead():
         "lookahead_window_m": lookahead_m,
         "alerts": alerts
     }), 200
+
+@app.post("/api/potholes/vulnerable_report")
+def vulnerable_pothole_report():
+    """
+    Hackathon Judge Demonstration: Vulnerable Mode pothole creation.
+    Bypasses speed threshold, GPS corridor snapping, and multi-fleet consensus.
+    Immediately creates a HIGH SEVERITY POTHOLE ticket in the PWD audit ledger.
+    """
+    with lock:
+        chainage_m = 5400.0
+        segment_idx = int(chainage_m // 25)
+        ticket_id = f"TKT-VULN-{len(pwd_tickets) + 101}"
+        ticket = {
+            "id": ticket_id,
+            "segment": segment_idx,
+            "chainage_start_m": round(segment_idx * 25.0, 1),
+            "chainage_end_m": round((segment_idx + 1) * 25.0, 1),
+            "chainage_mid_m": round((segment_idx + 0.5) * 25.0, 1),
+            "severity": "HIGH",
+            "confidence": 0.35,
+            "status": "OPEN",
+            "evidence_count": 3,
+            "distinct_source_groups": 1,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "repair_claimed_at": None,
+            "smooth_passes": [],
+            "notes": ["VULNERABLE MODE: Issued from single hand-shaken device with speed < 15 km/h (No GPS or speed verification)"]
+        }
+        pwd_tickets[ticket_id] = ticket
+        _append_audit_locked(
+            "pothole_ticket_created",
+            f"VULNERABLE MODE: Unverified complaint ticket {ticket_id} opened at NH-206 chainage 5.4km; NO speed or multi-fleet verification"
+        )
+        return jsonify({
+            "ok": True,
+            "ticket": ticket,
+            "message": "VULNERABLE MODE: HIGH SEVERITY POTHOLE ticket issued from phone shakes without speed/GPS verification!"
+        })
+
 
 @app.get("/api/potholes/dashboard")
 def potholes_dashboard():
