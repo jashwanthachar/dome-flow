@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0f172a">
+  <title>Report {{ config.title }} - CivicEye Tumakuru</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="mobile-container">
+    <!-- Header -->
+    <header class="form-header">
+      <a href="/" class="back-link">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M19 12H5M12 19l-7-7 7-7"/>
+        </svg>
+        <span>Back</span>
+      </a>
+      <div class="header-title-row">
+        <span class="category-header-icon">{{ config.icon }}</span>
+        <div>
+          <h1 class="page-title">Report {{ config.title }}</h1>
+          <p class="page-subtitle">{{ config.tagline }}</p>
+        </div>
+      </div>
+    </header>
+
+    {% if error %}
+    <div class="alert-error">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      <span>{{ error }}</span>
+    </div>
+    {% endif %}
+
+    <!-- Report Form -->
+    <form action="/report/{{ category }}" method="POST" enctype="multipart/form-data" class="report-form" id="report-form">
+      <!-- 1. Issue Type Dropdown -->
+      <div class="form-group">
+        <label for="issue_type" class="form-label">
+          <span>Issue Type</span>
+          <span class="req-star">*</span>
+        </label>
+        <div class="select-wrapper">
+          <select name="issue_type" id="issue_type" required class="form-select">
+            <option value="" disabled selected>Select the specific issue...</option>
+            {% for it in config.issue_types %}
+              <option value="{{ it }}">{{ it }}</option>
+            {% endfor %}
+          </select>
+          <span class="select-arrow">▼</span>
+        </div>
+      </div>
+
+      <!-- 2. Photo Upload & Preview -->
+      <div class="form-group">
+        <label class="form-label">
+          <span>Photo Evidence</span>
+          <span class="req-star">*</span>
+        </label>
+        
+        <input type="file" name="photo" id="photo-input" accept="image/*" capture="environment" required style="display: none;">
+        
+        <div class="photo-dropzone" id="photo-dropzone" tabindex="0" role="button" aria-label="Upload photo">
+          <div class="dropzone-empty" id="dropzone-empty">
+            <div class="camera-icon-circle">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+                <circle cx="12" cy="13" r="3"/>
+              </svg>
+            </div>
+            <p class="dropzone-text">Take a photo or upload from gallery</p>
+            <span class="dropzone-hint">Camera or image file (JPEG, PNG)</span>
+          </div>
+
+          <div class="dropzone-preview" id="dropzone-preview" style="display: none;">
+            <img src="" alt="Complaint photo preview" id="preview-img">
+            <div class="preview-overlay">
+              <span class="btn-change-photo">Change Photo</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Location Picker with Leaflet Map -->
+      <div class="form-group">
+        <div class="location-header-row">
+          <label class="form-label" style="margin-bottom: 0;">
+            <span>Location</span>
+            <span class="req-star">*</span>
+          </label>
+          <button type="button" class="btn-locate" id="btn-use-location">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+            </svg>
+            <span>Use My Location</span>
+          </button>
+        </div>
+
+        <p class="form-help-text">Drag the pin to mark the exact spot in Tumakuru:</p>
+        
+        <div id="location-map" class="map-container"></div>
+        
+        <div class="coords-bar">
+          <span class="coords-icon">📍</span>
+          <span id="coords-text" class="coords-text">Tumakuru (13.3392, 77.1140)</span>
+        </div>
+
+        <!-- Hidden inputs for coordinates and address -->
+        <input type="hidden" name="latitude" id="input-latitude" value="13.3392">
+        <input type="hidden" name="longitude" id="input-longitude" value="77.1140">
+        <input type="hidden" name="address_text" id="input-address" value="Tumakuru City">
+      </div>
+
+      <!-- 4. Description (Optional) -->
+      <div class="form-group">
+        <label for="description" class="form-label">
+          <span>Description</span>
+          <span class="optional-tag">(Optional)</span>
+        </label>
+        <textarea name="description" id="description" rows="3" class="form-textarea" placeholder="Add landmarks or details to help Tumakuru ward officers identify the issue..."></textarea>
+      </div>
+
+      <!-- 5. Submit Button -->
+      <div class="form-actions">
+        <button type="submit" class="btn-submit-report" id="btn-submit">
+          <span>Submit Grievance</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+          </svg>
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    // -------------------------------------------------------------
+    // Photo Upload & Preview Logic
+    // -------------------------------------------------------------
+    const photoInput = document.getElementById('photo-input');
+    const photoDropzone = document.getElementById('photo-dropzone');
+    const dropzoneEmpty = document.getElementById('dropzone-empty');
+    const dropzonePreview = document.getElementById('dropzone-preview');
+    const previewImg = document.getElementById('preview-img');
+
+    photoDropzone.addEventListener('click', () => photoInput.click());
+    photoDropzone.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        photoInput.click();
+      }
+    });
+
+    photoInput.addEventListener('change', () => {
+      const file = photoInput.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          previewImg.src = e.target.result;
+          dropzoneEmpty.style.display = 'none';
+          dropzonePreview.style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+
+    // -------------------------------------------------------------
+    // Leaflet OpenStreetMap Tumakuru Location Picker
+    // -------------------------------------------------------------
+    const defaultLat = 13.3392;
+    const defaultLng = 77.1140;
+
+    const latInput = document.getElementById('input-latitude');
+    const lngInput = document.getElementById('input-longitude');
+    const coordsText = document.getElementById('coords-text');
+    const btnUseLocation = document.getElementById('btn-use-location');
+
+    function updateCoords(lat, lng, address) {
+      const formattedLat = Number(lat).toFixed(5);
+      const formattedLng = Number(lng).toFixed(5);
+      latInput.value = formattedLat;
+      lngInput.value = formattedLng;
+      coordsText.textContent = address || `Lat: ${formattedLat}, Lon: ${formattedLng} (Tumakuru)`;
+    }
+
+    const map = L.map('location-map', {
+      center: [defaultLat, defaultLng],
+      zoom: 14,
+      zoomControl: true
+    });
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+
+    const marker = L.marker([defaultLat, defaultLng], {
+      draggable: true,
+      autoPan: true
+    }).addTo(map);
+
+    marker.on('dragend', function(e) {
+      const pos = e.target.getLatLng();
+      updateCoords(pos.lat, pos.lng);
+    });
+
+    map.on('click', function(e) {
+      marker.setLatLng(e.latlng);
+      updateCoords(e.latlng.lat, e.latlng.lng);
+    });
+
+    // Geolocation "Use my current location"
+    btnUseLocation.addEventListener('click', () => {
+      if (!navigator.geolocation) {
+        alert("Geolocation is not supported by your browser.");
+        return;
+      }
+      btnUseLocation.disabled = true;
+      btnUseLocation.innerHTML = `<span>Locating...</span>`;
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+          marker.setLatLng([lat, lng]);
+          map.setView([lat, lng], 16);
+          updateCoords(lat, lng, `My GPS: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+          btnUseLocation.disabled = false;
+          btnUseLocation.innerHTML = `
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            <span>Located!</span>
+          `;
+          setTimeout(() => {
+            btnUseLocation.innerHTML = `
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+              </svg>
+              <span>Use My Location</span>
+            `;
+          }, 3000);
+        },
+        (error) => {
+          btnUseLocation.disabled = false;
+          btnUseLocation.innerHTML = `
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+            </svg>
+            <span>Use My Location</span>
+          `;
+          alert("Could not retrieve your location. You can drag the pin on the map to mark the spot.");
+        },
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    });
+
+    // Invalidate map size on window load
+    setTimeout(() => { map.invalidateSize(); }, 250);
+  </script>
+</body>
+</html>

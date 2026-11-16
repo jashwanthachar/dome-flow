@@ -4,9 +4,11 @@ A modern civic grievance reporting and resolution platform for Tumakuru.
 """
 
 import os
+import uuid
 from datetime import datetime, timezone
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 from flask_sqlalchemy import SQLAlchemy
+from werkzeug.utils import secure_filename
 
 basedir = os.path.abspath(os.path.dirname(__file__))
 
@@ -17,7 +19,56 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
 )
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+# Photo upload configuration
+UPLOAD_FOLDER = os.path.join(basedir, "static", "uploads")
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB max upload
+
 db = SQLAlchemy(app)
+
+
+# -----------------------------------------------------------------------------
+# Category Configurations & Issue Types
+# -----------------------------------------------------------------------------
+
+CATEGORY_CONFIG = {
+    "road": {
+        "title": "Road Damage",
+        "icon": "🛣️",
+        "tagline": "Report potholes, broken footpaths & damaged road surfaces",
+        "issue_types": [
+            "Pothole",
+            "Broken footpath",
+            "Damaged road edge",
+            "Other"
+        ]
+    },
+    "pollution": {
+        "title": "Pollution",
+        "icon": "🏭",
+        "tagline": "Report garbage burning, open dumping & environmental hazards",
+        "issue_types": [
+            "Garbage burning",
+            "Garbage dump",
+            "Drain/sewage overflow",
+            "Dust or smoke",
+            "Other"
+        ]
+    },
+    "water": {
+        "title": "Water Leak",
+        "icon": "🚰",
+        "tagline": "Report pipeline bursts, water leaks & drainage contamination",
+        "issue_types": [
+            "Pipe leakage",
+            "Burst pipe",
+            "No water supply",
+            "Dirty water",
+            "Other"
+        ]
+    }
+}
 
 
 # -----------------------------------------------------------------------------
@@ -177,6 +228,17 @@ def init_db():
         seed_departments()
 
 
+def generate_tracking_id():
+    """Generate a clean, unique tracking ID like CE-2026-0001."""
+    year = datetime.now(timezone.utc).year
+    count = Complaint.query.count() + 1
+    candidate = f"CE-{year}-{count:04d}"
+    while Complaint.query.filter_by(tracking_id=candidate).first():
+        count += 1
+        candidate = f"CE-{year}-{count:04d}"
+    return candidate
+
+
 # Automatically run on startup
 with app.app_context():
     init_db()
@@ -192,49 +254,115 @@ def index():
     return render_template("index.html")
 
 
-@app.route("/report/<category>")
+@app.route("/report/<category>", methods=["GET", "POST"])
 def report(category):
-    """Placeholder page for reporting an issue in a specific category."""
-    category_meta = {
-        "road": {
-            "title": "Road Damage",
-            "icon": "🛣️",
-            "msg": "Report potholes, broken footpaths, and road cave-ins across Tumakuru wards."
-        },
-        "pollution": {
-            "title": "Pollution",
-            "icon": "🏭",
-            "msg": "Report garbage dumping, open waste burning, and toxic runoff in Tumakuru."
-        },
-        "water": {
-            "title": "Water Leak",
-            "icon": "🚰",
-            "msg": "Report pipeline bursts, contaminated tap water, and drainage leaks in Tumakuru."
-        }
-    }
-    meta = category_meta.get(category.lower(), {
-        "title": category.capitalize(),
-        "icon": "📋",
-        "msg": f"Reporting module for {category} grievances in Tumakuru."
-    })
-    return render_template(
-        "placeholder.html",
-        title=f"Report {meta['title']}",
-        heading=f"Report {meta['title']}",
-        icon=meta["icon"],
-        message=meta["msg"]
-    )
+    """Render category-specific grievance reporting form and handle citizen submissions."""
+    norm_cat = category.lower()
+    if norm_cat not in CATEGORY_CONFIG:
+        return redirect(url_for("index"))
+
+    config = CATEGORY_CONFIG[norm_cat]
+
+    if request.method == "POST":
+        issue_type = request.form.get("issue_type", "").strip()
+        description = request.form.get("description", "").strip()
+        latitude_val = request.form.get("latitude", "").strip()
+        longitude_val = request.form.get("longitude", "").strip()
+        address_text = request.form.get("address_text", "").strip() or "Tumakuru, Karnataka"
+        photo = request.files.get("photo")
+
+        # Basic Validation: Photo required
+        if not photo or not photo.filename:
+            return render_template(
+                "report.html",
+                category=norm_cat,
+                config=config,
+                error="Please capture or upload a photo of the grievance issue."
+            )
+
+        # Basic Validation: Location coordinates required
+        try:
+            latitude = float(latitude_val)
+            longitude = float(longitude_val)
+        except (TypeError, ValueError):
+            return render_template(
+                "report.html",
+                category=norm_cat,
+                config=config,
+                error="Valid location coordinates are required. Please use the map pin or location button."
+            )
+
+        # Issue type required
+        if not issue_type:
+            return render_template(
+                "report.html",
+                category=norm_cat,
+                config=config,
+                error="Please select an issue type from the dropdown."
+            )
+
+        # Save photo securely to static/uploads
+        ext = os.path.splitext(secure_filename(photo.filename))[1].lower()
+        if ext not in [".jpg", ".jpeg", ".png", ".webp", ".heic"]:
+            ext = ".jpg"
+        unique_filename = f"{uuid.uuid4().hex[:14]}{ext}"
+        photo_save_path = os.path.join(app.config["UPLOAD_FOLDER"], unique_filename)
+        photo.save(photo_save_path)
+        photo_rel_path = f"uploads/{unique_filename}"
+
+        # Assign relevant simulated department for category
+        dept = Department.query.filter_by(category=norm_cat).first()
+        dept_id = dept.id if dept else None
+
+        # Generate tracking ID and save Complaint
+        tracking_id = generate_tracking_id()
+        complaint = Complaint(
+            tracking_id=tracking_id,
+            category=norm_cat,
+            issue_type=issue_type,
+            description=description or f"{issue_type} reported in Tumakuru",
+            photo_path=photo_rel_path,
+            latitude=latitude,
+            longitude=longitude,
+            address_text=address_text,
+            status="Submitted",
+            department_id=dept_id
+        )
+        db.session.add(complaint)
+        db.session.flush()
+
+        # Add initial StatusHistory audit entry
+        status_entry = StatusHistory(
+            complaint_id=complaint.id,
+            status="Submitted",
+            note="Grievance submitted by citizen via CivicEye web portal."
+        )
+        db.session.add(status_entry)
+        db.session.commit()
+
+        return redirect(url_for("success", tracking_id=tracking_id))
+
+    # GET request
+    return render_template("report.html", category=norm_cat, config=config)
+
+
+@app.route("/success/<tracking_id>")
+def success(tracking_id):
+    """Display confirmation page with large tracking ID."""
+    complaint = Complaint.query.filter_by(tracking_id=tracking_id).first_or_404()
+    return render_template("success.html", complaint=complaint)
 
 
 @app.route("/track")
 def track():
     """Placeholder page for tracking grievance complaints."""
+    req_id = request.args.get("id", "").strip()
     return render_template(
         "placeholder.html",
         title="Track Complaint",
         heading="Track Your Grievance",
         icon="🔍",
-        message="Enter your CivicEye tracking ID (e.g., CE-2026-0001) to view live status updates and department action notes."
+        message=f"Tracking ID: {req_id}. Enter your CivicEye tracking ID to view live status updates and department action notes." if req_id else "Enter your CivicEye tracking ID (e.g., CE-2026-0001) to view live status updates and department action notes."
     )
 
 
