@@ -2,114 +2,108 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="CivicEye - Tumakuru Civic Grievance and Public Issues System">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="description" content="CivicEye Tumakuru - Report it. Track it. See it fixed.">
   <title>CivicEye - Tumakuru Civic Grievance System</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <header class="navbar">
-    <div class="nav-container">
-      <div class="brand">
-        <span class="brand-badge">CE</span>
-        <span class="brand-title">CivicEye</span>
-        <span class="brand-city">Tumakuru</span>
-      </div>
-      <div class="nav-status">
-        <span class="status-indicator"></span>
-        <span class="status-text">System Active</span>
-      </div>
-    </div>
-  </header>
-
-  <main class="main-content">
-    <section class="hero">
-      <div class="hero-content">
-        <p class="tagline">Tumakuru Municipal Civic Grievance Portal</p>
-        <h1>Empowering Citizens for a Cleaner, Safer Tumakuru</h1>
-        <p class="subtitle">
-          CivicEye is the dedicated civic grievance platform for the citizens of Tumakuru.
-          Report issues, track resolution in real time, and connect directly with local municipal authorities.
-        </p>
-      </div>
-    </section>
-
-    <section class="categories-section">
-      <div class="section-header">
-        <h2>Civic Grievance Categories</h2>
-        <p>Key service areas managed through CivicEye</p>
-      </div>
-
-      <div class="card-grid">
-        <div class="card">
-          <div class="card-icon">🛣️</div>
-          <h3>Roads &amp; Footpaths</h3>
-          <p>Report damaged roads, potholes, broken pavements, and pedestrian safety hazards across Tumakuru wards.</p>
+  <div class="mobile-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand-row">
+        <div class="logo-mark">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
         </div>
-
-        <div class="card">
-          <div class="card-icon">🧹</div>
-          <h3>Sanitation &amp; Waste</h3>
-          <p>Uncollected garbage, overflow in public bins, debris accumulation, and civic cleanliness issues.</p>
-        </div>
-
-        <div class="card">
-          <div class="card-icon">💡</div>
-          <h3>Street Lighting</h3>
-          <p>Non-functioning streetlights, exposed wiring, dark corridors, and electrical safety concerns.</p>
-        </div>
-
-        <div class="card">
-          <div class="card-icon">🚰</div>
-          <h3>Water &amp; Drainage</h3>
-          <p>Pipeline leaks, contaminated water supply, blocked storm-water drains, and sewage overflow.</p>
-        </div>
-
-        <div class="card">
-          <div class="card-icon">🌳</div>
-          <h3>Parks &amp; Public Spaces</h3>
-          <p>Maintenance of municipal parks, tree hazards, playground equipment, and public amenities.</p>
-        </div>
-
-        <div class="card">
-          <div class="card-icon">📋</div>
-          <h3>Town Planning &amp; Encroachments</h3>
-          <p>Unauthorized construction, public road encroachment, and municipal zoning complaints.</p>
+        <div class="brand-text">
+          <h1 class="brand-name">CivicEye</h1>
+          <span class="city-tag">Tumakuru</span>
         </div>
       </div>
-    </section>
+      <p class="hero-tagline">Report it. Track it. See it fixed.</p>
+      <p class="hero-subtext">Select a category to report a public issue in your ward</p>
+    </header>
 
-    <section class="workflow-section">
-      <div class="section-header">
-        <h2>How CivicEye Works</h2>
-        <p>Simple 3-step resolution process for citizens</p>
+    <!-- 3 Large Touch Cards -->
+    <main class="cards-list">
+      <!-- 1. Road Damage -->
+      <a href="/report/road" class="action-card" id="card-road">
+        <div class="card-icon-wrap">
+          <span class="card-emoji">🛣️</span>
+        </div>
+        <div class="card-body">
+          <div class="card-title-row">
+            <h2 class="card-title">Road Damage</h2>
+            <span class="card-arrow">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </span>
+          </div>
+          <p class="card-desc">Potholes, broken footpaths &amp; hazardous road cave-ins</p>
+        </div>
+      </a>
+
+      <!-- 2. Pollution -->
+      <a href="/report/pollution" class="action-card" id="card-pollution">
+        <div class="card-icon-wrap">
+          <span class="card-emoji">🏭</span>
+        </div>
+        <div class="card-body">
+          <div class="card-title-row">
+            <h2 class="card-title">Pollution</h2>
+            <span class="card-arrow">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </span>
+          </div>
+          <p class="card-desc">Garbage dumping, open waste burning &amp; toxic runoff</p>
+        </div>
+      </a>
+
+      <!-- 3. Water Leak -->
+      <a href="/report/water" class="action-card" id="card-water">
+        <div class="card-icon-wrap">
+          <span class="card-emoji">🚰</span>
+        </div>
+        <div class="card-body">
+          <div class="card-title-row">
+            <h2 class="card-title">Water Leak</h2>
+            <span class="card-arrow">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </span>
+          </div>
+          <p class="card-desc">Pipeline bursts, contaminated tap water &amp; clogged drains</p>
+        </div>
+      </a>
+    </main>
+
+    <!-- Bottom Navigation Links -->
+    <footer class="bottom-actions">
+      <div class="quick-links-grid">
+        <a href="/track" class="btn-quick-link" id="link-track">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/>
+            <path d="m21 21-4.3-4.3"/>
+          </svg>
+          <span>Track my complaint</span>
+        </a>
+        <a href="/dashboard" class="btn-quick-link secondary" id="link-dashboard">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect width="7" height="9" x="3" y="3" rx="1"/>
+            <rect width="7" height="5" x="14" y="3" rx="1"/>
+            <rect width="7" height="9" x="14" y="12" rx="1"/>
+            <rect width="7" height="5" x="3" y="16" rx="1"/>
+          </svg>
+          <span>Public dashboard</span>
+        </a>
       </div>
-
-      <div class="workflow-steps">
-        <div class="step-card">
-          <div class="step-num">01</div>
-          <h3>Report Issue</h3>
-          <p>Citizens capture the problem with location and details directly on the portal.</p>
-        </div>
-        <div class="step-card">
-          <div class="step-num">02</div>
-          <h3>Ward Assignment</h3>
-          <p>CivicEye routes the grievance to the respective Tumakuru ward official.</p>
-        </div>
-        <div class="step-card">
-          <div class="step-num">03</div>
-          <h3>Transparent Resolution</h3>
-          <p>Officials address the issue with verification and status updates for the citizen.</p>
-        </div>
+      <div class="footer-meta">
+        <p>Tumakuru City Corporation &bull; CivicEye Portal</p>
       </div>
-    </section>
-  </main>
-
-  <footer class="footer">
-    <div class="footer-container">
-      <p>&copy; 2026 CivicEye. Tumakuru Civic Grievance System. All rights reserved.</p>
-    </div>
-  </footer>
+    </footer>
+  </div>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

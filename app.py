@@ -192,6 +192,64 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/report/<category>")
+def report(category):
+    """Placeholder page for reporting an issue in a specific category."""
+    category_meta = {
+        "road": {
+            "title": "Road Damage",
+            "icon": "🛣️",
+            "msg": "Report potholes, broken footpaths, and road cave-ins across Tumakuru wards."
+        },
+        "pollution": {
+            "title": "Pollution",
+            "icon": "🏭",
+            "msg": "Report garbage dumping, open waste burning, and toxic runoff in Tumakuru."
+        },
+        "water": {
+            "title": "Water Leak",
+            "icon": "🚰",
+            "msg": "Report pipeline bursts, contaminated tap water, and drainage leaks in Tumakuru."
+        }
+    }
+    meta = category_meta.get(category.lower(), {
+        "title": category.capitalize(),
+        "icon": "📋",
+        "msg": f"Reporting module for {category} grievances in Tumakuru."
+    })
+    return render_template(
+        "placeholder.html",
+        title=f"Report {meta['title']}",
+        heading=f"Report {meta['title']}",
+        icon=meta["icon"],
+        message=meta["msg"]
+    )
+
+
+@app.route("/track")
+def track():
+    """Placeholder page for tracking grievance complaints."""
+    return render_template(
+        "placeholder.html",
+        title="Track Complaint",
+        heading="Track Your Grievance",
+        icon="🔍",
+        message="Enter your CivicEye tracking ID (e.g., CE-2026-0001) to view live status updates and department action notes."
+    )
+
+
+@app.route("/dashboard")
+def dashboard():
+    """Placeholder page for public transparency dashboard."""
+    return render_template(
+        "placeholder.html",
+        title="Public Dashboard",
+        heading="Tumakuru Public Dashboard",
+        icon="📊",
+        message="Public transparency metrics and ward-level resolution stats across Tumakuru City Corporation."
+    )
+
+
 @app.route("/health")
 def health():
     """Health check endpoint for deployment monitoring."""

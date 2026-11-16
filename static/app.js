@@ -4,15 +4,15 @@
  */
 
 document.addEventListener("DOMContentLoaded", () => {
-  console.log("CivicEye initialized for Tumakuru Civic Grievance System.");
+  // Add subtle ripple / tactile touch effect on cards
+  const cards = document.querySelectorAll(".action-card, .btn-quick-link");
+  cards.forEach(card => {
+    card.addEventListener("touchstart", () => {
+      card.style.transform = "scale(0.985)";
+    }, { passive: true });
 
-  // Check health endpoint on initialization
-  fetch("/health")
-    .then(res => res.json())
-    .then(data => {
-      console.log("CivicEye backend connection:", data.status);
-    })
-    .catch(err => {
-      console.warn("CivicEye backend notice:", err.message);
-    });
+    card.addEventListener("touchend", () => {
+      card.style.transform = "";
+    }, { passive: true });
+  });
 });
