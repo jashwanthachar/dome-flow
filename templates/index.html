@@ -1,697 +1,116 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#0b1424">
-  <title>DOME Flow — S2 Smart Mobility &amp; Preemption</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CivicEye - Tumakuru Civic Grievance and Public Issues System">
+  <title>CivicEye - Tumakuru Civic Grievance System</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-<div class="app-shell">
-  <aside class="sidebar glass">
-    <div class="brand"><div class="brand-mark">D</div><div><b>DOME <span>Flow</span></b><small>SMART MOBILITY</small></div></div>
-    <div class="side-label">WORKSPACE</div>
-    <button class="nav-link active" data-view="overview"><span>◫</span> Overview</button>
-    <button class="nav-link" data-view="corridor-map"><span>🗺️</span> Corridor Map</button>
-    <button class="nav-link" data-view="traffic"><span>⌁</span> Traffic &amp; incidents</button>
-    <button class="nav-link" data-view="manage"><span>▤</span> Road management</button>
-    <button class="nav-link" data-view="analytics"><span>▥</span> Analytics</button>
-    <button class="nav-link s2-nav-highlight" data-view="s2-command"><span>🚨</span> S2 Edge AI &amp; Preemption</button>
-    <div class="sidebar-bottom"><div class="operator"><div class="avatar">OP</div><div><b>City operator</b><small>Demo workspace</small></div><span class="online-dot"></span></div></div>
-  </aside>
+  <header class="navbar">
+    <div class="nav-container">
+      <div class="brand">
+        <span class="brand-badge">CE</span>
+        <span class="brand-title">CivicEye</span>
+        <span class="brand-city">Tumakuru</span>
+      </div>
+      <div class="nav-status">
+        <span class="status-indicator"></span>
+        <span class="status-text">System Active</span>
+      </div>
+    </div>
+  </header>
 
-  <main class="main">
-    <header class="topbar">
-      <div>
-        <div class="eyebrow" id="corridor-breadcrumb">SMART MOBILITY / NH-206: TUMAKURU – GUBBI – NITTUR CORRIDOR (28.5 KM)</div>
-        <h1 id="pageTitle">Good morning, operator <span>✦</span></h1>
+  <main class="main-content">
+    <section class="hero">
+      <div class="hero-content">
+        <p class="tagline">Tumakuru Municipal Civic Grievance Portal</p>
+        <h1>Empowering Citizens for a Cleaner, Safer Tumakuru</h1>
+        <p class="subtitle">
+          CivicEye is the dedicated civic grievance platform for the citizens of Tumakuru.
+          Report issues, track resolution in real time, and connect directly with local municipal authorities.
+        </p>
       </div>
-      <div class="top-actions">
-        <span class="top-action-btn" style="background: rgba(2, 132, 199, 0.2); border-color: rgba(56, 189, 248, 0.4); color: #38bdf8; cursor: default; font-weight: 700;">📍 NH-206: Tumakuru – Gubbi – Nittur (28.5 km)</span>
-        <button class="top-action-btn" id="btn-sim-tick" title="Simulate real-time traffic pulse">⚡ Sim Tick</button>
-        <button class="top-action-btn info-btn" id="btn-s2-info" title="View S2 math and constraints">S2 Math &amp; Constraints</button>
-        <span class="demo-pill"><i></i> DEMO DATA</span>
-        <button class="icon-btn" id="refreshBtn" title="Refresh demo data">↻</button>
-        <div class="date-chip"><span id="header-date"></span><b id="header-time"></b></div>
-      </div>
-    </header>
-
-    <!-- 1. OVERVIEW VIEW -->
-    <section class="view active" id="overview">
-      <div class="hero-row">
-        <div>
-          <div class="section-kicker">LIVE-STYLE CITY PICTURE</div>
-          <h2>Move through the corridor<br><em>with zero-delay clarity.</em></h2>
-          <p class="muted">A synchronized view of highway conditions, acoustic preemption waves, and road quality.</p>
-        </div>
-        <div class="hero-stat glass"><span class="stat-icon">↗</span><div><small>NETWORK FLOW</small><strong>72<span>%</span></strong><small class="positive">↑ 4% vs. previous hour</small></div></div>
-      </div>
-
-      <!-- S2 Live Impact Strip -->
-      <div class="s2-impact-strip glass">
-        <div class="impact-pill">
-          <span class="impact-icon emerald">⏱</span>
-          <div><small>GOLDEN HOUR SAVED</small><strong id="kpi-golden-hour">145s</strong></div>
-        </div>
-        <div class="impact-pill">
-          <span class="impact-icon blue">⛽</span>
-          <div><small>FUEL SAVED</small><strong id="kpi-fuel-saved">48.5 L</strong></div>
-        </div>
-        <div class="impact-pill">
-          <span class="impact-icon cyan">🌊</span>
-          <div><small>ACTIVE GREEN WAVES</small><strong id="kpi-green-waves">0</strong></div>
-        </div>
-        <div class="impact-pill">
-          <span class="impact-icon amber">⚠</span>
-          <div><small>VERIFIED BLACKSPOTS</small><strong id="kpi-blackspots">1</strong></div>
-        </div>
-        <div class="impact-pill">
-          <span class="impact-icon purple">📋</span>
-          <div><small>PWD WORK ORDERS</small><strong id="kpi-pwd-orders">1</strong></div>
-        </div>
-      </div>
-
-      <!-- Legacy Mobility Metrics Grid -->
-      <div class="metrics-grid">
-        <div class="metric glass"><div class="metric-head"><span>Active issues</span><span class="metric-icon amber">!</span></div><strong id="activeCount">3</strong><small><b class="amber-text">2 need attention</b> across monitored corridors</small></div>
-        <div class="metric glass"><div class="metric-head"><span>High severity</span><span class="metric-icon red">↗</span></div><strong id="highCount">1</strong><small>Priority response required</small></div>
-        <div class="metric glass"><div class="metric-head"><span>Avg. extra travel</span><span class="metric-icon blue">◷</span></div><strong>11 <small>min</small></strong><small>Estimated network-wide delay</small></div>
-        <div class="metric glass"><div class="metric-head"><span>Response time</span><span class="metric-icon green">✓</span></div><strong>6 <small>min</small></strong><small><b class="positive">On target</b> · sample metric</small></div>
-      </div>
-
-      <!-- 4-Junction Live Queue & Signal Status Grid -->
-      <div class="junctions-container">
-        <div class="section-kicker">NH-206 REAL-TIME CORRIDOR TELEMETRY · 4 MONITORED JUNCTIONS</div>
-        <div class="junctions-grid" id="junctions-grid">
-          <div class="junction-card glass" data-junction="J1">
-            <div class="junction-header">
-              <div class="j-info"><b class="j-id">J1</b> · <span class="j-name">CIT Campus Gate (NH-206)</span></div>
-              <span class="signal-badge green">GREEN</span>
-            </div>
-            <div class="junction-queues">
-              <span title="Queued Cars">🚗 <b class="q-cars">12</b></span>
-              <span title="Queued Trucks">🚚 <b class="q-trucks">4</b></span>
-              <span title="Queued Bikes">🛵 <b class="q-bikes">18</b></span>
-            </div>
-            <div class="junction-flush"><small>QUEUE DISCHARGE (saturation flow)</small> T_flush: <strong class="q-flush">35.3s</strong> <small class="q-flush-range">27.0–50.1s</small></div>
-          </div>
-          <div class="junction-card glass" data-junction="J2">
-            <div class="junction-header">
-              <div class="j-info"><b class="j-id">J2</b> · <span class="j-name">Gubbi Town Cross Junction</span></div>
-              <span class="signal-badge red">RED</span>
-            </div>
-            <div class="junction-queues">
-              <span title="Queued Cars">🚗 <b class="q-cars">24</b></span>
-              <span title="Queued Trucks">🚚 <b class="q-trucks">8</b></span>
-              <span title="Queued Bikes">🛵 <b class="q-bikes">35</b></span>
-            </div>
-            <div class="junction-flush"><small>QUEUE DISCHARGE (saturation flow)</small> T_flush: <strong class="q-flush">64.6s</strong> <small class="q-flush-range">48.2–93.9s</small></div>
-          </div>
-          <div class="junction-card glass" data-junction="J3">
-            <div class="junction-header">
-              <div class="j-info"><b class="j-id">J3</b> · <span class="j-name">Nittur Highway Market Bottleneck</span></div>
-              <span class="signal-badge red">RED</span>
-            </div>
-            <div class="junction-queues">
-              <span title="Queued Cars">🚗 <b class="q-cars">19</b></span>
-              <span title="Queued Trucks">🚚 <b class="q-trucks">7</b></span>
-              <span title="Queued Bikes">🛵 <b class="q-bikes">26</b></span>
-            </div>
-            <div class="junction-flush"><small>QUEUE DISCHARGE (saturation flow)</small> T_flush: <strong class="q-flush">52.9s</strong> <small class="q-flush-range">39.7–76.3s</small></div>
-          </div>
-          <div class="junction-card glass" data-junction="J4">
-            <div class="junction-header">
-              <div class="j-info"><b class="j-id">J4</b> · <span class="j-name">Batawadi – Tumakuru Entry Junction</span></div>
-              <span class="signal-badge green">GREEN</span>
-            </div>
-            <div class="junction-queues">
-              <span title="Queued Cars">🚗 <b class="q-cars">28</b></span>
-              <span title="Queued Trucks">🚚 <b class="q-trucks">9</b></span>
-              <span title="Queued Bikes">🛵 <b class="q-bikes">42</b></span>
-            </div>
-            <div class="junction-flush"><small>QUEUE DISCHARGE (saturation flow)</small> T_flush: <strong class="q-flush">74.3s</strong> <small class="q-flush-range">55.2–108.4s</small></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Map & Priority Incidents Grid: Tumakuru - Gubbi - Nittur Corridor -->
-      <div class="content-grid">
-        <div class="panel map-panel glass">
-          <div class="panel-heading">
-            <div>
-              <div class="section-kicker">REAL GEOGRAPHY · OPENSTREETMAP DIGITAL TWIN</div>
-              <h3>NH-206 Corridor: Tumakuru – Gubbi – Nittur (28.5 km)</h3>
-            </div>
-            <div class="map-legend">
-              <span class="scope-pill" style="font-size: 10px; padding: 2px 8px;">Prototype scope: Tumakuru - Gubbi - Nittur only</span>
-              <span><i class="dot green"></i> Real Signal (J1)</span>
-              <span><i class="dot amber"></i> Proposed ITS (J2, J3, J4)</span>
-              <span><i class="dot emerald-pulse"></i> Green Wave</span>
-            </div>
-          </div>
-          <div class="corridor-map-container" style="padding: 0; margin-top: 10px;">
-            <!-- Real Leaflet OpenStreetMap Container -->
-            <div id="corridor-leaflet-map" style="width: 100%; height: 420px; border-radius: 12px; z-index: 1;"></div>
-            <div class="map-caption" style="margin-top: 8px;">
-              <span><b>◉</b> Click any junction marker to inspect queue discharge &amp; signal state</span>
-              <span id="svg-map-caption">© OpenStreetMap contributors · ODbL (NH-206 / BH Road)</span>
-            </div>
-            <!-- Interactive Corridor Chainage Ruler -->
-            <div class="chainage-ruler-strip glass" style="margin-top: 10px;">
-              <div class="ruler-title">
-                <b>CORRIDOR CHAINAGE RULER (metres from Tumakuru start)</b>
-                <span id="ruler-hover-info">0.0 km (Batawadi NH-48) → 28.5 km (Nittur Market)</span>
-              </div>
-              <div class="chainage-bar" id="chainage-bar-track">
-                <div class="chainage-fill" id="chainage-fill"></div>
-                <div class="chainage-pin pin-tumakuru" style="left: 0%;" data-junction="J1" title="Tumakuru Batawadi (0 km) - Real Signal">
-                  <span class="pin-dot real"></span><small>0.0 km (J1)</small>
-                </div>
-                <div class="chainage-pin pin-cit stagger-above" style="left: 66.5%;" data-junction="J2" title="CIT Campus Gate (19.0 km) - Proposed ITS">
-                  <span class="pin-dot proposed"></span><small>19.0 km (J2)</small>
-                </div>
-                <div class="chainage-pin pin-gubbi stagger-below" style="left: 68.4%;" data-junction="J3" title="Gubbi Town Cross (19.5 km) - Proposed ITS">
-                  <span class="pin-dot proposed"></span><small>19.5 km (J3)</small>
-                </div>
-                <div class="chainage-pin pin-nittur" style="left: 100%;" data-junction="J4" title="Nittur Bottleneck (28.5 km) - Proposed ITS">
-                  <span class="pin-dot proposed"></span><small>28.5 km (J4)</small>
-                </div>
-              </div>
-              <div class="ruler-ticks">
-                <span>0 km (Tumakuru)</span>
-                <span>5 km</span>
-                <span>10 km</span>
-                <span>15 km</span>
-                <span>20 km (Gubbi)</span>
-                <span>25 km</span>
-                <span>28.5 km (Nittur)</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="panel incident-panel glass">
-          <div class="panel-heading"><div><div class="section-kicker">NEEDS ATTENTION</div><h3>Priority incidents</h3></div><button class="text-button" data-goto="traffic">View all →</button></div>
-          <div id="priorityList" class="priority-list"></div>
-          <div class="route-card"><div class="route-top"><span class="route-icon">↗</span><div><b>Suggested detour</b><small>For NH-206 · Gubbi Cross</small></div><span class="route-tag">+8 min</span></div><p>Gubbi Town Bypass <span>→</span> Rural Link Feeder <span>→</span> NH-206 Highway</p><button class="route-action" data-incident="NH-204">View route details <b>↗</b></button></div>
-        </div>
-      </div>
-      <div class="help-strip glass"><div class="help-symbol">✳</div><div><b>How DOME Flow S2 helps the city &amp; highway</b><p>Combines acoustic FFT emergency vehicle preemption, saturation-flow queue discharge, and zero-touch crowd-sourced road surface shocks to support emergency response and identify pothole risks.</p></div><span class="help-arrow">↗</span></div>
     </section>
 
-    <!-- CORRIDOR MAP VIEW (LEAFLET + OSM) -->
-    <section class="view" id="corridor-map">
-      <div class="view-intro">
-        <div>
-          <div class="section-kicker">REAL GEOGRAPHY · NH-206 DIGITAL TWIN</div>
-          <h2>Tumakuru – Gubbi – Nittur Corridor Map</h2>
-          <p class="muted">Live OpenStreetMap cartography with 28.5 km chainage ruler, real vs. proposed signal nodes, and preemption corridor overlay.</p>
+    <section class="categories-section">
+      <div class="section-header">
+        <h2>Civic Grievance Categories</h2>
+        <p>Key service areas managed through CivicEye</p>
+      </div>
+
+      <div class="card-grid">
+        <div class="card">
+          <div class="card-icon">🛣️</div>
+          <h3>Roads &amp; Footpaths</h3>
+          <p>Report damaged roads, potholes, broken pavements, and pedestrian safety hazards across Tumakuru wards.</p>
         </div>
-        <span class="operator-badge pulse-badge">© OpenStreetMap contributors</span>
-      </div>
 
-      <!-- Prototype Scope Note Banner -->
-      <div class="scope-note-banner glass">
-        <span class="scope-pill">CORRIDOR SCOPE</span>
-        <strong>Prototype scope: Tumakuru - Gubbi - Nittur corridor only.</strong>
-        <span>Chainage 0.0 km (Batawadi NH-48) → 28.5 km (Nittur Market)</span>
-      </div>
+        <div class="card">
+          <div class="card-icon">🧹</div>
+          <h3>Sanitation &amp; Waste</h3>
+          <p>Uncollected garbage, overflow in public bins, debris accumulation, and civic cleanliness issues.</p>
+        </div>
 
-      <div class="corridor-map-container glass">
-        <div id="corridor-dedicated-map" style="width: 100%; height: 580px; border-radius: 12px; z-index: 1;"></div>
+        <div class="card">
+          <div class="card-icon">💡</div>
+          <h3>Street Lighting</h3>
+          <p>Non-functioning streetlights, exposed wiring, dark corridors, and electrical safety concerns.</p>
+        </div>
 
-        <!-- Interactive Chainage Ruler Strip below Map -->
-        <div class="chainage-ruler-strip glass">
-          <div class="ruler-title">
-            <b>CORRIDOR CHAINAGE RULER (metres from Tumakuru start)</b>
-            <span id="ruler-hover-info">Hover over corridor or click a junction</span>
-          </div>
-          <div class="chainage-bar" id="chainage-bar-track">
-            <div class="chainage-fill" id="chainage-fill"></div>
-            <div class="chainage-pin pin-tumakuru" style="left: 0%;" data-junction="J1" title="Tumakuru Batawadi (0 km) - Real Signal">
-              <span class="pin-dot real"></span><small>0.0 km (J1)</small>
-            </div>
-            <div class="chainage-pin pin-cit stagger-above" style="left: 66.5%;" data-junction="J2" title="CIT Campus Gate (19.0 km) - Proposed ITS">
-              <span class="pin-dot proposed"></span><small>19.0 km (J2)</small>
-            </div>
-            <div class="chainage-pin pin-gubbi stagger-below" style="left: 68.4%;" data-junction="J3" title="Gubbi Town Cross (19.5 km) - Proposed ITS">
-              <span class="pin-dot proposed"></span><small>19.5 km (J3)</small>
-            </div>
-            <div class="chainage-pin pin-nittur" style="left: 100%;" data-junction="J4" title="Nittur Bottleneck (28.5 km) - Proposed ITS">
-              <span class="pin-dot proposed"></span><small>28.5 km (J4)</small>
-            </div>
-          </div>
-          <div class="ruler-ticks">
-            <span>0 km (Tumakuru)</span>
-            <span>5 km</span>
-            <span>10 km</span>
-            <span>15 km</span>
-            <span>20 km (Gubbi)</span>
-            <span>25 km</span>
-            <span>28.5 km (Nittur)</span>
-          </div>
+        <div class="card">
+          <div class="card-icon">🚰</div>
+          <h3>Water &amp; Drainage</h3>
+          <p>Pipeline leaks, contaminated water supply, blocked storm-water drains, and sewage overflow.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">🌳</div>
+          <h3>Parks &amp; Public Spaces</h3>
+          <p>Maintenance of municipal parks, tree hazards, playground equipment, and public amenities.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">📋</div>
+          <h3>Town Planning &amp; Encroachments</h3>
+          <p>Unauthorized construction, public road encroachment, and municipal zoning complaints.</p>
         </div>
       </div>
     </section>
 
-
-    <!-- 2. TRAFFIC & INCIDENTS VIEW -->
-    <section class="view" id="traffic">
-      <div class="view-intro"><div><div class="section-kicker">SITUATIONAL AWARENESS</div><h2>Traffic &amp; incidents</h2><p class="muted">Explore road conditions and inspect reported issues across corridors.</p></div><span class="count-chip" id="filterCount">4 records</span></div>
-      <div class="filter-bar glass" id="filters"><button class="filter active" data-filter="All">All issues</button><button class="filter" data-filter="Congestion">Congestion</button><button class="filter" data-filter="Accident">Accidents</button><button class="filter" data-filter="Road closure">Road closures</button><button class="filter" data-filter="Roadworks">Roadworks</button></div>
-      <div class="traffic-layout"><div class="panel glass traffic-map"><div class="panel-heading"><div><div class="section-kicker">SELECT TO INSPECT</div><h3>Incident locations</h3></div><span class="small-muted">Demo map</span></div><div class="mini-map" id="miniMap"></div></div><div class="panel glass"><div class="panel-heading"><div><div class="section-kicker">ALL REPORTED ITEMS</div><h3>Issue register</h3></div></div><div class="issue-list" id="issueList"></div></div></div>
-    </section>
-
-    <!-- 3. ROAD MANAGEMENT VIEW -->
-    <section class="view" id="manage">
-      <div class="view-intro"><div><div class="section-kicker">OPERATOR WORKSPACE</div><h2>Road management</h2><p class="muted">Review, assign a response state and keep the issue register current.</p></div><span class="operator-badge">◉ Operator mode</span></div>
-      <div class="notice glass"><span>ⓘ</span><div><b>Prototype controls</b><p>Status changes are stored in this demo session only. No field teams or external traffic systems are contacted.</p></div></div>
-      <div class="panel glass"><div class="panel-heading"><div><div class="section-kicker">RESPONSE QUEUE</div><h3>Incident management</h3></div><span class="small-muted">Select a status to update</span></div><div class="management-list" id="managementList"></div></div>
-    </section>
-
-    <!-- 4. MOBILITY ANALYTICS VIEW -->
-    <section class="view" id="analytics">
-      <div class="view-intro"><div><div class="section-kicker">NETWORK PERFORMANCE</div><h2>Mobility analytics</h2><p class="muted">Illustrative trends to support operational and infrastructure decisions.</p></div><span class="demo-pill"><i></i> SAMPLE METRICS</span></div>
-      <div class="analytics-kpis"><div class="metric glass"><small>AVG. TRAVEL TIME</small><strong>28 <small>min</small></strong><span class="positive">↓ 8% this week</span></div><div class="metric glass"><small>CONGESTION HOTSPOTS</small><strong>4</strong><span class="amber-text">2 high-priority corridors</span></div><div class="metric glass"><small>INCIDENT RESPONSE</small><strong>6 <small>min</small></strong><span class="positive">↓ 2 min this month</span></div><div class="metric glass"><small>TRAFFIC FLOW</small><strong>72<span>%</span></strong><span class="positive">↑ 4% this hour</span></div></div>
-      <div class="analytics-grid"><div class="panel glass chart-panel"><div class="panel-heading"><div><div class="section-kicker">WEEKLY MOVEMENT</div><h3>Average travel time</h3></div><span class="small-muted">Minutes · sample</span></div><div class="chart" id="travelChart"></div></div><div class="panel glass chart-panel"><div class="panel-heading"><div><div class="section-kicker">CORRIDOR WATCH</div><h3>Congestion hotspots</h3></div><span class="small-muted">Relative load</span></div><div class="hotspots" id="hotspots-container"><div><span>Outer Ring Road</span><b>82%</b><i><em style="width:82%"></em></i></div><div><span>Old Airport Road</span><b>67%</b><i><em style="width:67%"></em></i></div><div><span>100 Feet Road</span><b>54%</b><i><em style="width:54%"></em></i></div><div><span>MG Road</span><b>29%</b><i><em style="width:29%"></em></i></div></div></div></div>
-      <div class="insight-card glass"><span class="insight-icon">✦</span><div><b>Operational insight</b><p>Outer Ring Road / Gubbi Town Cross is the strongest congestion bottleneck in this sample. The queue-discharge estimate highlights when approach queues may need earlier clearance for an emergency vehicle.</p></div></div>
-    </section>
-
-    <!-- 5. S2 COMMAND VIEW (STEP 4) -->
-    <section class="view" id="s2-command" data-view-panel="s2-command">
-      <div class="view-intro">
-        <div>
-          <div class="section-kicker">S2 EDGE AI &amp; SIGNAL ADVISORY / SIMULATOR</div>
-          <h2>S2 Command Center</h2>
-          <p class="muted">A junction setup needs a microphone and a small edge device. A signed ambulance token and confirmed approaching siren must agree; the audit log records each decision.</p>
-        </div>
-        <span class="operator-badge pulse-badge">Decision &amp; Controller Adapter</span>
+    <section class="workflow-section">
+      <div class="section-header">
+        <h2>How CivicEye Works</h2>
+        <p>Simple 3-step resolution process for citizens</p>
       </div>
 
-      <div class="controller-safety-strip glass">
-        <span class="status-tag" id="controller-mode-status">ADVISORY · decision only</span>
-        <strong class="failsafe-badge" id="controller-failsafe-badge">FAIL-SAFE ACTIVE</strong>
-        <span id="controller-failsafe-reason">Waiting for decision and input heartbeats.</span>
-        <span id="controller-interlock-status">Waiting for controller status.</span>
-        <button type="button" id="controller-manual-override">Manual override · fixed-time plan</button>
-        <button type="button" id="controller-self-check">Run controller safety self-check</button>
-      </div>
-      <div class="controller-recommendation glass" id="controller-recommendation" hidden>
-        <div><b id="controller-recommendation-title">Recommendation</b><small id="controller-recommendation-details"></small></div>
-        <div class="controller-recommendation-actions">
-          <button type="button" data-recommendation-action="confirm">Confirm advisory</button>
-          <button type="button" data-recommendation-action="dismiss">Dismiss</button>
+      <div class="workflow-steps">
+        <div class="step-card">
+          <div class="step-num">01</div>
+          <h3>Report Issue</h3>
+          <p>Citizens capture the problem with location and details directly on the portal.</p>
         </div>
-      </div>
-      <div class="simulation-banner" id="controller-simulation-banner">SIMULATION, NOT CONNECTED TO REAL SIGNALS</div>
-
-      <!-- Judge Evaluation: Threat Scenarios Card -->
-      <div class="panel glass threat-eval-card" id="threat-eval-panel" style="margin-bottom: 20px; border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.37);">
-        <div class="panel-heading" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
-          <div>
-            <div class="section-kicker" style="color:#38bdf8; font-weight:800; letter-spacing:1px;">HACKATHON JUDGE EVALUATION</div>
-            <h3 style="margin:2px 0; display:flex; align-items:center; gap:8px;">
-              <span>⚖️ THREAT SCENARIOS: Vulnerable vs Secured AURA</span>
-            </h3>
-            <p class="muted" style="margin:2px 0 0; font-size:12px;">
-              Physically test attack scenarios: Siren audio spoofing &amp; fake phone shakes. Toggle between a naive vulnerable system and AURA's zero-trust verified pipeline.
-            </p>
-          </div>
-          <div style="display:flex; align-items:center; gap:12px;">
-            <div class="eval-mode-toggle" style="background:#090d16; border:1px solid #334155; border-radius:30px; padding:4px; display:inline-flex; align-items:center; gap:4px;">
-              <button type="button" id="btn-mode-vulnerable" class="mode-pill" style="border:none; background:transparent; color:#94a3b8; font-size:11px; font-weight:700; padding:6px 14px; border-radius:20px; cursor:pointer; transition:all 0.2s;">
-                ⚠️ VULNERABLE MODE (Spoofing Allowed)
-              </button>
-              <button type="button" id="btn-mode-secured" class="mode-pill active" style="border:none; background:#10b981; color:#ffffff; font-size:11px; font-weight:700; padding:6px 14px; border-radius:20px; cursor:pointer; transition:all 0.2s;">
-                🛡️ ENTERPRISE SECURED (Dual-Key &amp; Dedupe)
-              </button>
-            </div>
-          </div>
+        <div class="step-card">
+          <div class="step-num">02</div>
+          <h3>Ward Assignment</h3>
+          <p>CivicEye routes the grievance to the respective Tumakuru ward official.</p>
         </div>
-
-        <div class="eval-controls-row" style="margin-top:14px; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; background:rgba(15, 23, 42, 0.6); padding:12px 16px; border-radius:10px; border:1px solid rgba(255,255,255,0.06);">
-          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-            <button type="button" id="btn-simulate-shake" class="secondary-btn" style="background:#1e293b; color:#38bdf8; border:1px solid #38bdf8; font-size:12px; font-weight:700; padding:8px 16px; display:inline-flex; align-items:center; gap:6px;">
-              📱 Simulate Phone Shake (<span id="shake-hit-counter">0</span>/3 Hits)
-            </button>
-            <span id="threat-eval-hint" style="font-size:11px; color:#cbd5e1;">
-              Current Mode: <b id="current-mode-label" style="color:#10b981;">ENTERPRISE SECURED</b> — Shakes &amp; sirens require speed &gt; 15 km/h and ECDSA crypto tokens.
-            </span>
-          </div>
-          <div id="threat-eval-alert-pill" style="font-size:11px; font-weight:800; padding:6px 14px; border-radius:6px; background:#020617; border:1px solid #334155; color:#94a3b8; transition:all 0.3s ease;">
-            STATUS: Ready for test
-          </div>
-        </div>
-      </div>
-
-      <div class="s2-command-grid">
-        <!-- Left Column: Module A -->
-        <div class="panel glass s2-module-card">
-          <div class="panel-heading">
-            <div>
-              <div class="section-kicker">MODULE A — LOW-COST DUAL-KEY ADVISORY</div>
-              <h3>Emergency Signal Advisory &amp; Queue-Discharge Timing</h3>
-            </div>
-            <span class="status-tag in-progress" id="siren-status-badge">Acoustic Standby</span>
-          </div>
-
-          <!-- FFT Spectrum Box -->
-          <div class="fft-box glass">
-            <div class="fft-header">
-              <span class="fft-label">LIVE ACOUSTIC FFT SPECTRUM (500 Hz – 1800 Hz SEARCH BAND)</span>
-              <span class="confidence-chip">Detector Score: <b id="siren-confidence">0%</b></span>
-            </div>
-            <div class="canvas-wrap">
-              <canvas id="siren-fft-canvas" width="460" height="110"></canvas>
-            </div>
-            <div class="fft-controls">
-              <button class="primary-btn mic-btn" id="btn-mic-toggle">🎙️ Start Live Siren Mic (FFT)</button>
-              <div class="siren-summary">
-                <strong id="mic-privacy-indicator" hidden>MICROPHONE OFF</strong>
-                <span>State <b id="siren-detector-state">IDLE</b></span>
-                <span>Pattern <b id="siren-detector-label">none</b></span>
-                <span>Score <b id="siren-detector-confidence">0.00</b></span>
-              </div>
-            </div>
-            <div class="siren-live-stats">
-              <span>Peak <b id="siren-frequency">—</b></span>
-              <span>Prominence <b id="siren-prominence">—</b></span>
-              <span>Flatness <b id="siren-flatness">—</b></span>
-            </div>
-          </div>
-
-          <div class="privacy-panel glass" id="privacy-panel">
-            <div class="range-panel-heading"><b>Privacy controls</b><span>Install ID <strong id="privacy-install-id">Creating…</strong></span></div>
-            <p>Audio is analyzed in this browser. No raw audio, waveform, spectrogram, or recording is uploaded or retained.</p>
-            <div class="privacy-mic-row"><span id="mic-consent-state">No microphone consent recorded</span><button type="button" id="mic-consent-withdraw">Withdraw mic consent / stop</button></div>
-            <div class="range-table-wrap"><table class="range-table"><thead><tr><th>Device</th><th>Fields sent</th><th>Purpose</th></tr></thead><tbody>
-              <tr><td>108 driver app</td><td>Enrollment: vehicle_id, public_key. Status query: vehicle_id. On duty: vehicle_id, lat, lon, heading_deg, speed_kmh, timestamp, nonce, signature. Header: X-Privacy-Install-ID.</td><td>Exact position only for an enrolled, approved vehicle after Start duty; stopped on End duty</td></tr>
-              <tr><td>Junction unit demo</td><td>Enrollment: unit_id, junction_id, public_key. Event: unit_id, junction_id, timestamp, nonce, label, confidence, approach, slope, r_squared, signature. Header: X-Privacy-Install-ID.</td><td>Signed derived siren confirmation; raw audio never leaves the device</td></tr>
-              <tr><td>Dashboard decision</td><td>junction_id, vehicle_id, stage, siren_confidence, siren_confirmed, unit_event_id, siren_label, approach, approach_conf, cars, trucks, bikes. Header: X-Privacy-Install-ID.</td><td>Evaluate and audit a preemption request</td></tr>
-              <tr><td>Road-shock demo</td><td>corridor, jerk_mps3, speed_kmh, source, probe_id; X-Privacy-Install-ID header</td><td>Separate demo telemetry; sends no GPS or audio</td></tr>
-            </tbody></table></div>
-            <p>Exact location is sent only while an enrolled, approved ambulance is on duty. This demo sends no location in non-emergency requests; if that changes, use a roughly 50 m grid. The per-install ID is random and resettable. Other dashboard control requests may contain only their operation fields (for example source, junction_id, mode, or scenario); inspect the viewer for the exact latest JSON body.</p>
-            <div class="privacy-actions"><button type="button" id="privacy-refresh">Refresh retention summary</button><button type="button" id="privacy-delete">Delete my data</button><button type="button" id="privacy-reset-id">Delete data &amp; reset ID</button><button type="button" id="privacy-self-check">Run privacy self-check</button></div>
-            <p id="privacy-retention-status" role="status">Loading retention status…</p>
-            <p id="privacy-status" role="status">Audit entries are retained without coordinates; identifier redaction recomputes the chain.</p>
-            <label>Last request payload sent (local viewer)<textarea id="privacy-last-payload" readonly rows="7">No request payload captured yet.</textarea></label>
-          </div>
-
-          <div class="range-panel glass" id="siren-range-panel">
-            <div class="range-panel-heading"><b>Two-stage ambulance approach</b><span>Mic estimate: <strong id="mic-range-result">—</strong></span></div>
-            <p>A network warning arms the junction and starts queue-clear preparation, but never grants green. Green requires a confirmed siren pattern within the estimated microphone range.</p>
-            <div class="range-inputs">
-              <label>Siren SPL at reference (dB)<input id="range-spl" type="number" step="1"></label>
-              <label>Reference distance (m)<input id="range-ref-dist" type="number" min="0.1" step="0.1"></label>
-              <label>Traffic noise (dB)<input id="range-noise" type="number" step="1"></label>
-              <label>Minimum SNR (dB)<input id="range-min-snr" type="number" step="1"></label>
-            </div>
-            <div class="range-table-wrap"><table class="range-table"><thead><tr><th>Distance</th><th>Estimated SPL</th><th>SNR</th><th>Detectable</th></tr></thead><tbody id="range-table-body"></tbody></table></div>
-            <small>Estimate, free-field, no buildings or reflections. Try higher traffic noise for peak traffic and lower noise at night. Validate all assumptions with field recordings.</small>
-          </div>
-
-          <div class="siren-test-panel glass" id="siren-test-panel" hidden>
-            <div class="siren-test-heading">
-              <div><b>Test signals</b><small>Dev only · generated and analyzed in this browser</small></div>
-              <button class="secondary-btn" id="siren-self-check">Run self-check</button>
-            </div>
-            <div class="siren-test-buttons">
-              <button data-siren-test="wail">Wail sweep</button>
-              <button data-siren-test="yelp">Yelp sweep</button>
-              <button data-siren-test="hiLo">Hi-lo</button>
-              <button data-siren-test="horn">Steady horn</button>
-              <button data-siren-test="noise">White noise</button>
-              <button data-siren-test="chord">Two-tone chord</button>
-            </div>
-            <div class="direction-test-buttons">
-              <button type="button" data-direction-test="approach">Synthetic approach</button>
-              <button type="button" data-direction-test="recede">Synthetic recede</button>
-              <button type="button" data-direction-test="constant">Constant level</button>
-              <button type="button" id="direction-self-check">Direction self-check</button>
-            </div>
-            <div class="approach-simulator">
-              <b>Ambulance approach simulator</b>
-              <label>Distance <input id="ambulance-sim-distance" type="range" min="0" max="600" value="600"><strong id="ambulance-sim-distance-value">600 m</strong></label>
-              <label>Speed (km/h) <input id="ambulance-sim-speed" type="number" min="1" max="160" value="65"></label>
-              <label>Simulated network heading toward junction (degrees; 0=N, 90=E)<input id="ambulance-sim-heading" type="number" min="0" max="359" value="10"></label>
-              <div>ETA <strong id="ambulance-sim-eta">33.2 s</strong> · State <strong id="approach-state">IDLE</strong></div>
-              <div class="approach-timeline"><span>IDLE: outside warning radius</span><span>ARMED: <b id="approach-armed-at">—</b></span><span>CONFIRMED: <b id="approach-confirmed-at">—</b></span></div>
-              <small id="approach-queue-countdown">Waiting for network warning.</small>
-              <div class="approach-actions"><button type="button" id="ambulance-sim-run">Run approach 600 m → 0</button><button type="button" id="ambulance-sim-siren">Simulate siren at mic range</button></div>
-              <div class="direction-readout">
-                <span>Slope <b id="direction-slope">0.00 dB/s</b></span>
-                <span>R² <b id="direction-r2">0.00</b></span>
-                <span>Trend <b id="direction-state">UNKNOWN</b></span>
-                <span>Doppler <b id="direction-doppler">—</b></span>
-                <span>Arm <b id="direction-arm">Unknown</b></span>
-                <span>Stereo hint <b id="direction-stereo">—</b></span>
-                <span class="direction-gate-result">Gate <b id="direction-gate">Denied · Trend uncertain</b></span>
-              </div>
-            <div class="dual-key-tools">
-              <div><b>Dual-key authenticated gate</b> · <a href="/ambulance" target="_blank" rel="noopener">Open 108 Driver App</a></div>
-              <label>Verified vehicle <select id="verified-vehicle"><option value="">No vehicle selected</option></select></label>
-              <label>Admin token <input id="admin-token" type="password" autocomplete="off" placeholder="ADMIN_TOKEN"></label>
-              <button type="button" id="vehicle-refresh">Refresh vehicles &amp; audit</button>
-              <p id="dual-key-status" role="status">Both the ambulance and junction unit must have approved signing keys.</p>
-              <div class="range-table-wrap"><table class="range-table"><thead><tr><th>Vehicle</th><th>Status</th><th>Last report</th><th>Admin</th></tr></thead><tbody id="vehicle-registry-body"></tbody></table></div>
-              <h4>Junction acoustic unit</h4>
-              <button type="button" id="junction-unit-enroll">Create / enroll unit for selected junction</button>
-              <p id="junction-unit-status" role="status">The private key stays in this browser's IndexedDB.</p>
-              <div class="range-table-wrap"><table class="range-table"><thead><tr><th>Unit</th><th>Junction</th><th>Status</th><th>Last signed event</th><th>Admin</th></tr></thead><tbody id="unit-registry-body"></tbody></table></div>
-              <h4>Try to break it</h4>
-              <div class="siren-test-buttons"><button data-attack="recorded">Unsigned siren, no token</button><button data-attack="replay">Replay old vehicle token</button><button data-attack="tamper">Tampered vehicle report</button><button data-attack="revoked">Revoked vehicle</button><button data-attack="teleport">Teleport 5 km</button><button data-attack="unknown-unit">Unknown unit event</button><button data-attack="revoked-unit">Revoked unit event</button><button data-attack="replay-event">Replay acoustic event</button><button data-attack="wrong-junction">Wrong-junction unit</button><button data-attack="valid">Valid vehicle + signed siren</button><button id="attack-self-check">Run attack self-check</button></div>
-              <div class="range-panel-heading"><b>Audit hash chain</b><strong id="audit-chain-status">Loading…</strong></div>
-              <div class="range-table-wrap"><table class="range-table"><thead><tr><th>Decision</th><th>Reason</th><th>Vehicle / unit</th><th>Junction</th><th>Time</th></tr></thead><tbody id="audit-log-body"></tbody></table></div>
-            </div>
-            </div>
-            <small id="siren-test-playing">Open this page with ?dev=1 to show developer tools.</small>
-          </div>
-
-          <!-- Preemption Queue Parameters -->
-          <div class="s2-form-grid">
-            <div class="form-group full-width">
-              <label for="preempt-junction">Target Corridor Junction</label>
-              <select id="preempt-junction">
-                <option value="J1">J1: CIT Campus Gate (NH-206)</option>
-                <option value="J2" selected>J2: Gubbi Town Cross Junction</option>
-                <option value="J3">J3: Nittur Highway Market Bottleneck</option>
-                <option value="J4">J4: Batawadi – Tumakuru Entry Junction</option>
-              </select>
-            </div>
-            <div class="form-row-3">
-              <div class="form-group">
-                <label for="preempt-cars">Queued Cars</label>
-                <input type="number" id="preempt-cars" value="14" min="0" max="80">
-              </div>
-              <div class="form-group">
-                <label for="preempt-trucks">Heavy Trucks</label>
-                <input type="number" id="preempt-trucks" value="3" min="0" max="40">
-              </div>
-              <div class="form-group">
-                <label for="preempt-bikes">Bikes / 2W</label>
-                <input type="number" id="preempt-bikes" value="22" min="0" max="120">
-              </div>
-            </div>
-            <div class="form-row-2">
-              <div class="form-group">
-                <label for="preempt-dist">Ambulance Distance (m)</label>
-                <input type="number" id="preempt-dist" value="450" min="50" max="3000">
-              </div>
-              <div class="form-group">
-                <label for="preempt-speed">Approach Speed (km/h)</label>
-                <input type="number" id="preempt-speed" value="65" min="20" max="140">
-              </div>
-            </div>
-          </div>
-
-          <!-- Live Math Box -->
-          <div class="math-box glass" id="tflush-math-box">
-            <div class="math-title">QUEUE DISCHARGE (saturation flow)</div>
-            <div class="formula-line" id="queue-formula">3.5 + 2.0 + (24*1.0 + 8*2.2 + 35*0.5 + 0*1.2) * 2.0 / 2 = 64.6 s</div>
-            <div class="math-eval">
-              <span>Nominal discharge time: <strong id="calc-tflush">64.6s</strong> (<strong id="calc-tflush-range">48.2–93.9s</strong>)</span>
-              <span>Ambulance ETA: <strong id="calc-eta">24.9s</strong> <small id="calc-eta-source">manual estimate</small></span>
-              <span class="margin-status danger" id="calc-margin">TOO LATE: queue will not clear in time</span>
-            </div>
-            <small id="queue-breakdown">Reaction 3.5s · start-up 2.0s · cars 24.0s · heavy vehicles 17.6s · two-wheelers 17.5s · auto-rickshaws 0.0s · 2 lanes</small>
-            <button class="secondary-btn" id="queue-self-check" type="button">Run queue model self-check</button>
-            <button class="secondary-btn" id="harm-self-check" type="button">Run minimum-harm self-check</button>
-          </div>
-
-          <button class="danger-action-btn" id="btn-trigger-preempt" title="Simulator only in DEMO_AUTO; ADVISORY never changes a phase">🚑 Safety-gated signal request · simulator only</button>
-        </div>
-
-        <!-- Right Column: Module B - B2B Partner Fleet Pothole Intelligence -->
-        <div class="panel glass s2-module-card">
-          <div class="panel-heading">
-            <div>
-              <div class="section-kicker">MODULE B — B2B PARTNER FLEET TELEMATICS</div>
-              <h3>Fleet Pothole Intelligence &amp; PWD Audit</h3>
-            </div>
-            <span class="status-tag live" id="pothole-role-status-badge">Role: PWD Officer</span>
-          </div>
-
-          <div class="explanation-pill">
-            <span>ⓘ B2B Plugin: Telemetry collected strictly from partner commercial fleets (cabs, buses, trucks). Derived on-device events only; zero raw sensor stream, zero microphone access. Partners are write-only.</span>
-          </div>
-
-          <!-- Role Gate Bar -->
-          <div class="pothole-role-strip glass" style="margin-top: 12px; padding: 12px; border-radius: 8px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-              <span style="font-size:11px; font-weight:700; color:#38bdf8;">ROAD AGENCY ACCESS GATE (PWD / POLICE)</span>
-              <a href="/partner-demo" target="_blank" class="text-button" style="font-size:11px;">Open Partner Fleet App Demo (/partner-demo) ↗</a>
-            </div>
-            <div style="display:flex; gap:8px; align-items:center;">
-              <input type="password" id="pothole-role-token" placeholder="Enter PWD_TOKEN or POLICE_TOKEN" value="demo-pwd-token" style="flex:1; background:#0f172a; border:1px solid #334155; color:#fff; padding:6px 10px; border-radius:6px; font-size:12px;">
-              <button class="secondary-btn" id="btn-auth-pwd" style="padding:6px 12px; font-size:11px;" type="button">Auth as PWD</button>
-              <button class="secondary-btn" id="btn-auth-police" style="padding:6px 12px; font-size:11px;" type="button">Auth as Police</button>
-            </div>
-            <div id="pothole-role-message" style="font-size:10px; color:#10b981; margin-top:4px;">
-              Authenticated as PWD role. Full ticket triage &amp; repair verification enabled.
-            </div>
-          </div>
-
-          <!-- Partner Telematics Ingest Stats & Partner-Blind Toggle -->
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px;">
-            <div class="inertial-card glass" style="padding:10px;">
-              <small style="color:#94a3b8; font-size:10px;">REGISTERED FLEET PARTNERS</small>
-              <div style="margin-top:4px; font-size:13px; font-weight:700; color:#e2e8f0;">QuickCabs · CityBus Transit</div>
-              <small style="color:#38bdf8; font-size:10px;" id="pothole-stats-ingest">Accepted: 0 · Rejected: 0</small>
-            </div>
-            <div class="inertial-card glass" style="padding:10px;">
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <small style="color:#94a3b8; font-size:10px;">PARTNER-BLIND VIEW</small>
-                <input type="checkbox" id="toggle-partner-view">
-              </div>
-              <div style="margin-top:4px; font-size:11px; color:#cbd5e1;" id="partner-view-desc">
-                Toggle to simulate external partner perspective (read endpoints return 403 Forbidden).
-              </div>
-            </div>
-          </div>
-
-          <!-- Partner Alert Simulated Preview (Visible when toggle-partner-view checked) -->
-          <div id="partner-view-box" class="glass" style="display:none; margin-top:10px; padding:10px; border:1px dashed #f59e0b; border-radius:8px;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span style="color:#f59e0b; font-weight:700; font-size:11px;">⚠️ SIMULATED PARTNER FLEET VIEW (/api/partner/alerts)</span>
-              <span style="background:#dc2626; color:#fff; font-size:9px; padding:2px 6px; border-radius:4px; font-weight:700;">403 FORBIDDEN ON RAW RECORDS</span>
-            </div>
-            <div id="partner-alerts-content" style="font-size:11px; color:#e2e8f0; margin-top:6px;">
-              Partner key queries upcoming hazard severity bands ahead within 2 km. Coordinates, ticket IDs, and other partner data are strictly blocked.
-            </div>
-          </div>
-
-          <!-- PWD Tickets Table -->
-          <div style="margin-top:14px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-              <b style="font-size:12px; color:#e2e8f0;">CORRIDOR POTHOLE TICKETS (NH-206)</b>
-              <button class="text-button" id="btn-refresh-potholes" style="font-size:11px;">Refresh Tickets ⟳</button>
-            </div>
-            <div class="table-container glass" style="max-height:190px; overflow-y:auto; border-radius:8px;">
-              <table style="width:100%; border-collapse:collapse; font-size:11px; text-align:left;">
-                <thead>
-                  <tr style="border-bottom:1px solid #334155; color:#94a3b8;">
-                    <th style="padding:6px;">ID</th>
-                    <th style="padding:6px;">Chainage</th>
-                    <th style="padding:6px;">Severity</th>
-                    <th style="padding:6px;">Conf</th>
-                    <th style="padding:6px;">Groups</th>
-                    <th style="padding:6px;">Status</th>
-                    <th style="padding:6px;">Action</th>
-                  </tr>
-                </thead>
-                <tbody id="pothole-tickets-tbody">
-                  <tr>
-                    <td colspan="7" style="padding:14px; text-align:center; color:#94a3b8;">
-                      No tickets open. Run a fleet simulation pass below or ingest telemetry.
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <!-- Fleet Simulator & "Try to break it" (?dev=1) -->
-          <div class="fleet-sim-box glass" style="margin-top:14px; padding:12px; border-radius:8px; border:1px solid rgba(56, 189, 248, 0.2);">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-              <b style="font-size:11px; color:#38bdf8;">⚡ FLEET SIMULATOR &amp; "TRY TO BREAK IT" SUITE</b>
-              <button class="primary-btn" id="btn-run-all-tests" style="font-size:10px; padding:4px 10px;">Run 8-Test Suite</button>
-            </div>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
-              <button class="secondary-btn sim-btn" data-action="clean_pass" style="font-size:10px; padding:6px;">1. Clean Fleet Pass</button>
-              <button class="secondary-btn sim-btn" data-action="speed_breaker_pass" style="font-size:10px; padding:6px;">2. Speed Breaker Learning</button>
-              <button class="secondary-btn sim-btn" data-action="bus_shake_attack" style="font-size:10px; padding:6px;">3. Bus-Shake Dedupe</button>
-              <button class="secondary-btn sim-btn" data-action="swerve_pass" style="font-size:10px; padding:6px;">4. Swerve Avoidance</button>
-              <button class="secondary-btn sim-btn" data-action="slow_spikes" style="font-size:10px; padding:6px;">5. Slow-Speed Filter</button>
-              <button class="secondary-btn sim-btn" data-action="partner_read_attempt" style="font-size:10px; padding:6px;">6. Partner 403 Read Check</button>
-              <button class="secondary-btn sim-btn" data-action="repair_and_smooth" style="font-size:10px; padding:6px;">7. Repair &amp; 3 Smooth Passes</button>
-              <button class="secondary-btn sim-btn" data-action="repair_failed_pass" style="font-size:10px; padding:6px;">8. Repair-Failed Reopen</button>
-            </div>
-            <div id="test-suite-console" style="margin-top:8px; display:none; background:#020617; border:1px solid #1e293b; border-radius:6px; padding:8px; font-family:monospace; font-size:10px; color:#38bdf8; max-height:130px; overflow-y:auto;"></div>
-          </div>
+        <div class="step-card">
+          <div class="step-num">03</div>
+          <h3>Transparent Resolution</h3>
+          <p>Officials address the issue with verification and status updates for the citizen.</p>
         </div>
       </div>
     </section>
-
-    <footer> DOME Flow <span>·</span> S2 Smart traffic, clearer journeys <span class="footer-right">Prototype only · Data is simulated</span></footer>
   </main>
-</div>
 
-<!-- Mobile Navigation Bar -->
-<nav class="mobile-nav">
-  <button class="active" data-view="overview"><span>◫</span>Home</button>
-  <button data-view="traffic"><span>⌁</span>Traffic</button>
-  <button data-view="manage"><span>▤</span>Manage</button>
-  <button data-view="analytics"><span>▥</span>Insights</button>
-  <button data-view="s2-command"><span>🚨</span>S2 Edge</button>
-</nav>
-
-<!-- Incident Detail Modal (Existing) -->
-<div class="modal-backdrop" id="incidentModal"><div class="modal glass"><button class="modal-close" id="closeModal">×</button><div id="modalContent"></div></div></div>
-
-<!-- S2 Info & Constraints Modal (Step 4) -->
-<div class="modal-backdrop" id="modal-s2-info">
-  <div class="modal glass s2-info-modal">
-    <button class="modal-close" id="close-s2-info-modal">×</button>
-    <div class="section-kicker">S2 SMARTER TRAFFIC &amp; ROAD MANAGEMENT ARCHITECTURE</div>
-    <h2>Mathematical Foundations &amp; System Constraints</h2>
-    
-    <div class="constraint-card glass">
-      <div class="constraint-head">
-        <span class="constraint-badge">S2 CONSTRAINT #1</span>
-        <b>NH-206 Corridor Geographical Scope</b>
-      </div>
-      <p>Focused on the high-density rural-urban transition corridor on <strong>National Highway 206 (CIT Gubbi to Tumakuru)</strong>. This 22-kilometer arterial features 4 critical bottleneck intersections:</p>
-      <ul class="constraint-list">
-        <li><strong>J1: CIT Campus Gate</strong> — Student transit surge mixed with industrial freight.</li>
-        <li><strong>J2: Gubbi Town Cross</strong> — Agricultural produce haulage, tractors &amp; intercity bus bottleneck.</li>
-        <li><strong>J3: Nittur Highway Market</strong> — Dense pedestrian market activity &amp; single-lane culvert bottlenecks.</li>
-        <li><strong>J4: Batawadi Entry Junction</strong> — Multi-lane toll and industrial entry into Tumakuru city center.</li>
-      </ul>
+  <footer class="footer">
+    <div class="footer-container">
+      <p>&copy; 2026 CivicEye. Tumakuru Civic Grievance System. All rights reserved.</p>
     </div>
+  </footer>
 
-    <div class="constraint-card glass">
-      <div class="constraint-head">
-        <span class="constraint-badge">S2 CONSTRAINT #2</span>
-        <b>Queue Discharge Model &amp; Crowd Telematics Assumptions</b>
-      </div>
-      <p><strong>Saturation-flow queue-discharge equation:</strong></p>
-      <div class="math-callout">
-        <code>T_flush = t_react + t_startup + (Σ count_i × PCU_i) × h / effective_lanes</code>
-      </div>
-      <p>Greenshields describes speed-density relationships for moving traffic, so it was replaced with a stopped-queue discharge estimate. Current assumptions: reaction 3.5 s, start-up lost time 2.0 s, nominal saturation headway 2.0 s/PCU (about 1800 PCU/hr/lane), and 2 effective lanes per arm. PCU factors: car 1.0, two-wheeler 0.5, heavy vehicle 2.2, auto-rickshaw 1.2. Estimates include h=1.7–2.6 s/PCU and ±15% PCU uncertainty. These values require calibration; verify PCU factors against IRC:106 before presenting. The high estimate is used for the timing check; it does not guarantee real-world queue clearance.</p>
-      <p><strong>Crowd-Telematics Inertial Filter:</strong> Filters configured vehicle speeds below 15 km/h or phone jerk below 15 m/s³. Three qualifying phone hits create a demo PWD work-order entry.</p>
-    </div>
-  </div>
-</div>
-
-<div class="toast" id="toast"></div>
-<dialog class="privacy-consent-dialog" id="siren-consent-dialog" aria-labelledby="siren-consent-title">
-  <h2 id="siren-consent-title">Microphone consent</h2>
-  <p><strong>What:</strong> the browser reads live microphone samples to calculate siren frequency pattern, confidence, loudness trend, slope and R-squared. Raw samples, recordings, waveforms and spectrograms stay in memory on this device and are not uploaded or saved.</p>
-  <p><strong>Why:</strong> derive a local siren event. Only the derived event fields are sent, signed by the junction-unit demo key.</p>
-  <p><strong>How long:</strong> the microphone is used only while active; signed derived acoustic events are retained on the server for up to 7 days. You can stop the mic or withdraw consent below at any time; withdrawal stops capture and blocks further acoustic requests.</p>
-  <div class="privacy-actions"><button type="button" id="mic-consent-accept">Accept and start</button><button type="button" id="mic-consent-deny">Deny</button></div>
-</dialog>
-<script src="{{ url_for('static', filename='app.js') }}"></script>
-</body></html>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
