@@ -50,6 +50,87 @@
         </button>
       </div>
 
+      <!-- AI Analysis Card -->
+      <div class="ai-analysis-card">
+        <div class="ai-card-header">
+          <div class="ai-brand-badge">
+            <span class="ai-spark-icon">✨</span>
+            <span class="ai-card-title">AI Analysis</span>
+          </div>
+          {% if complaint.severity %}
+            {% if complaint.severity <= 2 %}
+              <span class="severity-badge sev-green">Severity {{ complaint.severity }}/5 &bull; Minor</span>
+            {% elif complaint.severity == 3 %}
+              <span class="severity-badge sev-amber">Severity 3/5 &bull; Moderate</span>
+            {% else %}
+              <span class="severity-badge sev-red">Severity {{ complaint.severity }}/5 &bull; Critical</span>
+            {% endif %}
+          {% endif %}
+        </div>
+
+        {% if complaint.image_matches_report is not none and not complaint.image_matches_report %}
+        <div class="ai-warning-box">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="warning-icon">
+            <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <div class="warning-text">
+            <strong>Photo Verification Notice:</strong> The uploaded image may not clearly match the reported issue. A municipal field engineer will manually inspect the site.
+          </div>
+        </div>
+        {% endif %}
+
+        <div class="ai-card-body">
+          <div class="ai-item">
+            <span class="ai-item-label">Detected Issue:</span>
+            <span class="ai-item-value highlight-issue">{{ complaint.detected_issue or complaint.issue_type }}</span>
+          </div>
+
+          {% if complaint.ai_summary %}
+          <div class="ai-item">
+            <span class="ai-item-label">Summary:</span>
+            <span class="ai-item-value">{{ complaint.ai_summary }}</span>
+          </div>
+          {% endif %}
+
+          {% if complaint.reasons_list %}
+          <div class="ai-item reasons-block">
+            <span class="ai-item-label">Assessment Factors:</span>
+            <ul class="ai-reasons-list">
+              {% for reason in complaint.reasons_list %}
+              <li>{{ reason }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          {% endif %}
+
+          {% if complaint.suggested_action %}
+          <div class="ai-item action-block">
+            <span class="ai-item-label">Suggested Action:</span>
+            <span class="ai-action-text">{{ complaint.suggested_action }}</span>
+          </div>
+          {% endif %}
+
+          <div class="ai-item">
+            <span class="ai-item-label">Assigned Department:</span>
+            <span class="ai-dept-name">{{ complaint.department.name if complaint.department else 'Tumakuru Municipal Administration' }}</span>
+          </div>
+        </div>
+
+        <div class="ai-card-footer">
+          <div class="ai-admin-note">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="16" x2="12" y2="12"/>
+              <line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            <span>AI suggestion - reviewed by an administrator</span>
+          </div>
+          <div class="ai-simulated-note">Simulated department workflow</div>
+        </div>
+      </div>
+
       <!-- Grievance Summary Card -->
       <div class="summary-card">
         <div class="summary-row">

@@ -4,12 +4,14 @@ A modern civic grievance reporting and resolution platform for Tumakuru.
 """
 
 import os
+import json
 import uuid
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
+from ai_triage import analyze_complaint
 
 basedir = os.path.abspath(os.path.dirname(__file__))
 load_dotenv(os.path.join(basedir, ".env"))
@@ -118,11 +120,25 @@ class Complaint(db.Model):
     )  # Submitted / Under Review / Assigned / In Progress / Resolved
     severity = db.Column(db.Integer, nullable=True)  # 1-5 (nullable for now)
     ai_summary = db.Column(db.Text, nullable=True)
+    severity_reasons = db.Column(db.Text, nullable=True)  # JSON text
+    image_matches_report = db.Column(db.Boolean, nullable=True)
+    ai_confidence = db.Column(db.Float, nullable=True)
+    ai_source = db.Column(db.String(20), nullable=True)  # "gemini" or "fallback"
+    parent_id = db.Column(db.Integer, db.ForeignKey("complaint.id"), nullable=True)
+    report_count = db.Column(db.Integer, default=1, nullable=False)
+    detected_issue = db.Column(db.String(150), nullable=True)
+    suggested_action = db.Column(db.String(255), nullable=True)
     department_id = db.Column(db.Integer, db.ForeignKey("department.id"), nullable=True)
     created_at = db.Column(
         db.DateTime,
         nullable=False,
         default=lambda: datetime.now(timezone.utc)
+    )
+
+    parent = db.relationship(
+        "Complaint",
+        remote_side=[id],
+        backref=db.backref("children", lazy=True)
     )
 
     history = db.relationship(
@@ -132,6 +148,21 @@ class Complaint(db.Model):
         cascade="all, delete-orphan",
         order_by="StatusHistory.changed_at.desc()"
     )
+
+    @property
+    def reasons_list(self):
+        """Helper returning parsed list of severity reasons."""
+        if not self.severity_reasons:
+            return []
+        try:
+            parsed = json.loads(self.severity_reasons)
+            if isinstance(parsed, list):
+                return parsed
+            elif isinstance(parsed, dict) and "reasons" in parsed:
+                return parsed["reasons"]
+            return [str(parsed)]
+        except Exception:
+            return [self.severity_reasons]
 
     def to_dict(self):
         return {
@@ -148,6 +179,14 @@ class Complaint(db.Model):
             "status": self.status,
             "severity": self.severity,
             "ai_summary": self.ai_summary,
+            "severity_reasons": self.reasons_list,
+            "image_matches_report": self.image_matches_report,
+            "ai_confidence": self.ai_confidence,
+            "ai_source": self.ai_source,
+            "parent_id": self.parent_id,
+            "report_count": self.report_count,
+            "detected_issue": self.detected_issue,
+            "suggested_action": self.suggested_action,
             "department_id": self.department_id,
             "created_at": self.created_at.isoformat(),
         }
@@ -225,6 +264,21 @@ def seed_departments():
 
 def init_db():
     """Ensure database tables exist and seed initial departments if empty."""
+    inspector = db.inspect(db.engine)
+    if inspector.has_table("complaint"):
+        columns = [col["name"] for col in inspector.get_columns("complaint")]
+        required_cols = {
+            "severity_reasons",
+            "image_matches_report",
+            "ai_confidence",
+            "ai_source",
+            "parent_id",
+            "report_count",
+        }
+        if not required_cols.issubset(set(columns)):
+            print("Detected missing columns in complaint table; dropping and recreating database...")
+            db.drop_all()
+
     db.create_all()
     if Department.query.count() == 0:
         seed_departments()
@@ -312,10 +366,6 @@ def report(category):
         photo.save(photo_save_path)
         photo_rel_path = f"uploads/{unique_filename}"
 
-        # Assign relevant simulated department for category
-        dept = Department.query.filter_by(category=norm_cat).first()
-        dept_id = dept.id if dept else None
-
         # Generate tracking ID and save Complaint
         tracking_id = generate_tracking_id()
         complaint = Complaint(
@@ -328,7 +378,7 @@ def report(category):
             longitude=longitude,
             address_text=address_text,
             status="Submitted",
-            department_id=dept_id
+            report_count=1,
         )
         db.session.add(complaint)
         db.session.flush()
@@ -340,6 +390,41 @@ def report(category):
             note="Grievance submitted by citizen via CivicEye web portal."
         )
         db.session.add(status_entry)
+        db.session.commit()
+
+        # Execute AI triage analysis
+        triage = analyze_complaint(
+            category=norm_cat,
+            issue_type=issue_type,
+            description=description,
+            photo_path=photo_save_path,
+        )
+
+        # Store AI triage results on complaint
+        complaint.severity = triage.get("severity")
+        complaint.ai_summary = triage.get("summary")
+        complaint.severity_reasons = json.dumps(triage.get("severity_reasons") or [])
+        complaint.image_matches_report = triage.get("image_matches_report")
+        complaint.ai_confidence = triage.get("confidence")
+        complaint.ai_source = triage.get("ai_source", "gemini")
+        complaint.detected_issue = triage.get("detected_issue") or issue_type
+        complaint.suggested_action = triage.get("suggested_action")
+
+        # Department assignment: choose seeded department of matching category
+        rec_cat = triage.get("recommended_department_type") or norm_cat
+        dept = (
+            Department.query.filter_by(category=rec_cat).first()
+            or Department.query.filter_by(category=norm_cat).first()
+        )
+        complaint.department_id = dept.id if dept else None
+
+        # Record AI triage audit note; status stays "Submitted"
+        ai_history = StatusHistory(
+            complaint_id=complaint.id,
+            status="Submitted",
+            note="AI triage completed"
+        )
+        db.session.add(ai_history)
         db.session.commit()
 
         return redirect(url_for("success", tracking_id=tracking_id))

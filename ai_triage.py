@@ -292,6 +292,7 @@ def get_rule_based_fallback(
         "suggested_action": rule["action"],
         "recommended_department_type": cat_key,
         "confidence": 0.75,
+        "ai_source": "fallback",
     }
 
 
@@ -350,6 +351,11 @@ def _sanitize_result(raw_dict: Dict[str, Any], fallback: Dict[str, Any]) -> Dict
     except (ValueError, TypeError):
         confidence = fallback["confidence"]
 
+    # ai_source
+    ai_source = str(raw_dict.get("ai_source") or "gemini").strip().lower()
+    if ai_source not in ("gemini", "fallback"):
+        ai_source = fallback.get("ai_source", "gemini")
+
     return {
         "detected_issue": detected_issue,
         "image_matches_report": image_matches_report,
@@ -359,6 +365,7 @@ def _sanitize_result(raw_dict: Dict[str, Any], fallback: Dict[str, Any]) -> Dict
         "suggested_action": suggested_action,
         "recommended_department_type": dept_type,
         "confidence": confidence,
+        "ai_source": ai_source,
     }
 
 
