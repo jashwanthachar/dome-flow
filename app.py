@@ -615,6 +615,65 @@ def api_status():
     }), 200
 
 
+@app.route("/debug/ai")
+def debug_ai():
+    """
+    Temporary diagnostic route for testing Gemini API connection.
+    Protected by ?token= matching env var DEBUG_TOKEN.
+    """
+    expected_token = os.environ.get("DEBUG_TOKEN", "").strip()
+    provided_token = request.args.get("token", "").strip()
+
+    if not expected_token or provided_token != expected_token:
+        return jsonify({
+            "error": "Unauthorized. Make sure DEBUG_TOKEN is set in Render environment and passed as ?token=..."
+        }), 403
+
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    model_name = os.environ.get("GEMINI_MODEL", "").strip() or "gemini-2.5-flash"
+    key_present = bool(api_key and api_key not in ("paste-your-key-here", "your_api_key_here"))
+
+    if not key_present:
+        return jsonify({
+            "key_present": False,
+            "model_name": model_name,
+            "success": False,
+            "error": "GEMINI_API_KEY is not set or empty in environment."
+        }), 200
+
+    try:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(timeout=20000),  # 20-second timeout
+        )
+        resp = client.models.generate_content(
+            model=model_name,
+            contents="Reply with the word OK",
+            config=types.GenerateContentConfig(
+                temperature=0.0,
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
+            )
+        )
+        reply_text = resp.text.strip() if resp.text else ""
+        return jsonify({
+            "key_present": True,
+            "model_name": model_name,
+            "success": True,
+            "response": reply_text,
+            "error": None
+        }), 200
+    except Exception as exc:
+        return jsonify({
+            "key_present": True,
+            "model_name": model_name,
+            "success": False,
+            "error": f"{exc.__class__.__name__}: {str(exc)}"
+        }), 200
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)

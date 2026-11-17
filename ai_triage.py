@@ -573,11 +573,15 @@ def analyze_complaint(
 
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not api_key or api_key in ("paste-your-key-here", "your_api_key_here"):
-        logger.info("GEMINI_API_KEY missing or unconfigured; using rule-based fallback triage.")
+        reason = "GEMINI_API_KEY environment variable is missing, empty, or a placeholder."
+        print(f"[AI_TRIAGE_FALLBACK] {reason}", flush=True)
+        logger.warning(reason)
         return fallback
 
     if not photo_path:
-        logger.info("No photo provided for complaint; using rule-based fallback triage.")
+        reason = "No photo_path provided for complaint."
+        print(f"[AI_TRIAGE_FALLBACK] {reason}", flush=True)
+        logger.warning(reason)
         return fallback
 
     model_name = os.environ.get("GEMINI_MODEL", "").strip() or DEFAULT_GEMINI_MODEL
@@ -607,16 +611,13 @@ def analyze_complaint(
         return result
 
     except concurrent.futures.TimeoutError:
-        logger.warning(
-            "Gemini AI triage timed out after %.1f seconds; using rule-based fallback.",
-            API_TIMEOUT_SECONDS,
-        )
+        reason = f"Gemini AI triage call timed out after {API_TIMEOUT_SECONDS} seconds."
+        print(f"[AI_TRIAGE_FALLBACK] {reason}", flush=True)
+        logger.warning(reason)
         return fallback
     except Exception as exc:
         # Never log the secret key
-        logger.warning(
-            "Gemini AI triage failed (%s: %s); using rule-based fallback.",
-            exc.__class__.__name__,
-            exc,
-        )
+        reason = f"Gemini AI triage exception: {exc.__class__.__name__}: {exc}"
+        print(f"[AI_TRIAGE_FALLBACK] {reason}", flush=True)
+        logger.warning(reason)
         return fallback
