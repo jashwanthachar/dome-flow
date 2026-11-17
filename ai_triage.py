@@ -394,6 +394,34 @@ def _sanitize_result(raw_dict: Dict[str, Any], fallback: Dict[str, Any]) -> Dict
     }
 
 
+def optimize_image_for_ai(original_path: str, max_dimension: int = 1024, quality: int = 80) -> str:
+    """
+    Downscale photo server-side with Pillow (max 1024px on longest side, JPEG quality 80).
+    Keeps original file untouched for display and returns path to the optimized JPEG.
+    """
+    try:
+        from PIL import Image, ImageOps
+        if not os.path.exists(original_path):
+            return original_path
+
+        dir_name = os.path.dirname(original_path)
+        base_name = os.path.basename(original_path)
+        name, _ = os.path.splitext(base_name)
+        opt_path = os.path.join(dir_name, f"opt_{name}.jpg")
+
+        # Open and orient image
+        with Image.open(original_path) as img:
+            img = ImageOps.exif_transpose(img)
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            img.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
+            img.save(opt_path, "JPEG", quality=quality, optimize=True)
+            return opt_path
+    except Exception as exc:
+        logger.warning("Could not optimize image with Pillow (%s); using original: %s", exc, original_path)
+        return original_path
+
+
 def _call_gemini_api(
     api_key: str,
     model_name: str,
@@ -426,16 +454,19 @@ def _call_gemini_api(
     if not os.path.exists(resolved_path):
         raise FileNotFoundError(f"Complaint photo not found at path: {photo_path}")
 
-    with open(resolved_path, "rb") as f:
+    # Ensure optimized with Pillow (max 1024px longest side, JPEG quality 80)
+    ai_photo_path = optimize_image_for_ai(resolved_path, max_dimension=1024, quality=80)
+
+    with open(ai_photo_path, "rb") as f:
         img_bytes = f.read()
 
     if not img_bytes:
         raise ValueError("Complaint photo file is empty (0 bytes).")
 
     # Determine image MIME type
-    mime_type, _ = mimetypes.guess_type(resolved_path)
+    mime_type, _ = mimetypes.guess_type(ai_photo_path)
     if not mime_type or not mime_type.startswith("image/"):
-        ext = os.path.splitext(resolved_path)[1].lower()
+        ext = os.path.splitext(ai_photo_path)[1].lower()
         mime_map = {
             ".jpg": "image/jpeg",
             ".jpeg": "image/jpeg",

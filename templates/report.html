@@ -442,8 +442,40 @@
       });
     }
 
+    // -------------------------------------------------------------
+    // Full-screen Loading Overlay on Form Submit
+    // -------------------------------------------------------------
+    const reportForm = document.getElementById('report-form');
+    const btnSubmit = document.getElementById('btn-submit');
+    const loadingOverlay = document.getElementById('loading-overlay');
+
+    if (reportForm) {
+      reportForm.addEventListener('submit', (e) => {
+        if (!reportForm.checkValidity()) {
+          return;
+        }
+        if (btnSubmit) {
+          btnSubmit.disabled = true;
+          btnSubmit.style.opacity = '0.6';
+          btnSubmit.style.cursor = 'not-allowed';
+        }
+        if (loadingOverlay) {
+          loadingOverlay.style.display = 'flex';
+        }
+      });
+    }
+
     // Invalidate map size on window load
     setTimeout(() => { map.invalidateSize(); }, 250);
   </script>
+
+  <!-- Full-screen AI Loading Overlay -->
+  <div id="loading-overlay" class="loading-overlay" style="display: none;">
+    <div class="loading-card">
+      <div class="ai-loading-spinner"></div>
+      <div class="loading-title">Analyzing your complaint with AI...</div>
+      <div class="loading-subtitle">Multimodal analysis in progress &bull; Please wait</div>
+    </div>
+  </div>
 </body>
 </html>

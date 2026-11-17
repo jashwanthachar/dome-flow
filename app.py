@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
-from ai_triage import analyze_complaint
+from ai_triage import analyze_complaint, optimize_image_for_ai
 
 basedir = os.path.abspath(os.path.dirname(__file__))
 load_dotenv(os.path.join(basedir, ".env"))
@@ -482,14 +482,67 @@ def report(category):
             )
             db.session.add(nearby_entry)
 
+            # -------------------------------------------------------------
+            # Duplicate Grievance: Skip Gemini call entirely and reuse parent
+            # -------------------------------------------------------------
+            complaint.detected_issue = nearby_parent.detected_issue or issue_type
+            complaint.ai_summary = nearby_parent.ai_summary
+            complaint.suggested_action = nearby_parent.suggested_action
+            complaint.severity = nearby_parent.severity
+            complaint.severity_reasons = nearby_parent.severity_reasons
+            complaint.image_matches_report = nearby_parent.image_matches_report
+            complaint.ai_confidence = nearby_parent.ai_confidence
+            complaint.ai_source = nearby_parent.ai_source or "gemini"
+            complaint.department_id = nearby_parent.department_id
+
+            # Audit note for inherited AI triage
+            ai_history = StatusHistory(
+                complaint_id=complaint.id,
+                status="Submitted",
+                note="AI triage completed (inherited from nearby report)"
+            )
+            db.session.add(ai_history)
+
+            # Update parent metrics
+            nearby_parent.report_count = (nearby_parent.report_count or 1) + 1
+
+            # Raise parent's severity by 1 (max 5) once report_count reaches 3
+            if nearby_parent.report_count >= 3:
+                curr_sev = nearby_parent.severity or 1
+                if curr_sev < 5:
+                    nearby_parent.severity = min(5, curr_sev + 1)
+
+                # Add crowd reason "Reported by N citizens"
+                reasons = list(nearby_parent.reasons_list)
+                crowd_reason = f"Reported by {nearby_parent.report_count} citizens"
+                reasons = [r for r in reasons if not r.startswith("Reported by ")]
+                reasons.append(crowd_reason)
+                nearby_parent.severity_reasons = json.dumps(reasons)
+
+            # Record duplicate linkage in parent's history
+            parent_history = StatusHistory(
+                complaint_id=nearby_parent.id,
+                status=nearby_parent.status,
+                note=f"Additional grievance report linked ({tracking_id}) from citizen within {int(dist_m)}m. Total reports: {nearby_parent.report_count}."
+            )
+            db.session.add(parent_history)
+
+            db.session.commit()
+            return redirect(url_for("success", tracking_id=tracking_id))
+
         db.session.commit()
+
+        # -------------------------------------------------------------
+        # Fresh Grievance: Downscale photo with Pillow & run AI triage
+        # -------------------------------------------------------------
+        ai_photo_path = optimize_image_for_ai(photo_save_path, max_dimension=1024, quality=80)
 
         # Execute AI triage analysis (with optional audio note)
         triage = analyze_complaint(
             category=norm_cat,
             issue_type=issue_type,
             description=description,
-            photo_path=photo_save_path,
+            photo_path=ai_photo_path,
             audio_path=audio_save_path,
         )
 
@@ -526,31 +579,6 @@ def report(category):
             note="AI triage completed"
         )
         db.session.add(ai_history)
-
-        # If linked to a parent complaint, update parent metrics
-        if nearby_parent:
-            nearby_parent.report_count = (nearby_parent.report_count or 1) + 1
-
-            # Raise parent's severity by 1 (max 5) once report_count reaches 3
-            if nearby_parent.report_count >= 3:
-                curr_sev = nearby_parent.severity or 1
-                if curr_sev < 5:
-                    nearby_parent.severity = min(5, curr_sev + 1)
-
-                # Add crowd reason "Reported by N citizens"
-                reasons = list(nearby_parent.reasons_list)
-                crowd_reason = f"Reported by {nearby_parent.report_count} citizens"
-                reasons = [r for r in reasons if not r.startswith("Reported by ")]
-                reasons.append(crowd_reason)
-                nearby_parent.severity_reasons = json.dumps(reasons)
-
-            # Record duplicate linkage in parent's history
-            parent_history = StatusHistory(
-                complaint_id=nearby_parent.id,
-                status=nearby_parent.status,
-                note=f"Additional grievance report linked ({tracking_id}) from citizen within {int(dist_m)}m. Total reports: {nearby_parent.report_count}."
-            )
-            db.session.add(parent_history)
 
         db.session.commit()
 
