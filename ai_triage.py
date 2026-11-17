@@ -18,8 +18,8 @@ load_dotenv()
 logger = logging.getLogger("civiceye.ai_triage")
 
 # Default Flash-class model
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
-API_TIMEOUT_SECONDS = 10.0
+DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
+API_TIMEOUT_SECONDS = 15.0
 
 
 # -----------------------------------------------------------------------------
