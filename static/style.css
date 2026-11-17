@@ -761,6 +761,244 @@ html, body {
 }
 
 /* -------------------------------------------------------------
+   VOICE RECORDER STYLES
+   ------------------------------------------------------------- */
+.voice-recorder-card {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px dashed rgba(14, 165, 233, 0.35);
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.btn-voice-record {
+  width: 100%;
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.12), rgba(56, 189, 248, 0.08));
+  border: 1px solid rgba(14, 165, 233, 0.3);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.btn-voice-record:hover {
+  background: rgba(14, 165, 233, 0.2);
+  border-color: var(--accent);
+}
+
+.mic-icon-circle {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(14, 165, 233, 0.2);
+  color: var(--accent-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.voice-btn-text-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.voice-btn-main {
+  color: #ffffff;
+  font-size: 14.5px;
+  font-weight: 700;
+}
+
+.voice-btn-sub {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+/* Active Recording View */
+.voice-recording-view {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.recording-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pulse-rec-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: #ef4444;
+  box-shadow: 0 0 10px #ef4444;
+  animation: pulse-recording 1s infinite alternate;
+}
+
+.rec-label-text {
+  color: #ef4444;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+
+.rec-timer-countdown {
+  font-size: 13px;
+  font-family: monospace;
+  color: #ffffff;
+  font-weight: 700;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.btn-stop-record {
+  background: #ef4444;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.btn-stop-record:hover {
+  background: #dc2626;
+}
+
+.stop-icon-sq {
+  width: 9px;
+  height: 9px;
+  background: #ffffff;
+  border-radius: 1px;
+}
+
+/* Preview & Attached View */
+.voice-preview-view {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.audio-player-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.voice-attached-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #34d399;
+}
+
+.voice-chk-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+}
+
+.btn-rerecord {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.2s ease;
+}
+
+.btn-rerecord:hover {
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.custom-audio-player, .summary-audio-player {
+  width: 100%;
+  height: 36px;
+  border-radius: 8px;
+  outline: none;
+}
+
+.summary-audio-box {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Voice Transcript Block on Success Page */
+.voice-transcript-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.voice-transcript-card {
+  background: rgba(14, 165, 233, 0.07);
+  border: 1px solid rgba(14, 165, 233, 0.3);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.transcript-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.transcript-mic-tag {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--accent-light);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.transcript-lang-tag {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.transcript-text {
+  font-size: 13px;
+  line-height: 1.45;
+  color: #f0fdf4;
+  font-style: italic;
+}
+
+@keyframes pulse-recording {
+  from { opacity: 0.5; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1.15); }
+}
+
+/* -------------------------------------------------------------
    NEARBY DUPLICATE LINKED BANNER STYLES
    ------------------------------------------------------------- */
 .nearby-alert-banner {

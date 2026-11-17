@@ -115,6 +115,19 @@
           </div>
           {% endif %}
 
+          {% if complaint.transcription %}
+          <div class="ai-item voice-transcript-block">
+            <span class="ai-item-label">Voice Note Transcript (English Translation):</span>
+            <div class="voice-transcript-card">
+              <div class="transcript-header-row">
+                <span class="transcript-mic-tag">🎙️ Spoken Grievance</span>
+                <span class="transcript-lang-tag">Transcribed &amp; Translated by Gemini</span>
+              </div>
+              <p class="transcript-text">"{{ complaint.transcription }}"</p>
+            </div>
+          </div>
+          {% endif %}
+
           {% if complaint.reasons_list %}
           <div class="ai-item reasons-block">
             <span class="ai-item-label">Assessment Factors:</span>
@@ -167,6 +180,10 @@
           <span class="status-badge-pill">{{ complaint.status }}</span>
         </div>
         <div class="summary-row">
+          <span class="summary-label">Description:</span>
+          <span class="summary-value">{{ complaint.description }}</span>
+        </div>
+        <div class="summary-row">
           <span class="summary-label">Date:</span>
           <span class="summary-value">{{ complaint.created_at.strftime('%d %b %Y, %I:%M %p') }}</span>
         </div>
@@ -174,6 +191,12 @@
         <div class="summary-row">
           <span class="summary-label">Coordinates:</span>
           <span class="summary-value">{{ complaint.latitude }}, {{ complaint.longitude }}</span>
+        </div>
+        {% endif %}
+        {% if complaint.audio_path %}
+        <div class="summary-audio-box">
+          <span class="summary-label" style="display:block; margin-bottom: 6px;">Submitted Voice Note:</span>
+          <audio controls src="{{ url_for('static', filename=complaint.audio_path) }}" class="summary-audio-player"></audio>
         </div>
         {% endif %}
         {% if complaint.photo_path %}

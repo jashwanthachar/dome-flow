@@ -129,6 +129,7 @@ class Complaint(db.Model):
     report_count = db.Column(db.Integer, default=1, nullable=False)
     detected_issue = db.Column(db.String(150), nullable=True)
     suggested_action = db.Column(db.String(255), nullable=True)
+    transcription = db.Column(db.Text, nullable=True)
     department_id = db.Column(db.Integer, db.ForeignKey("department.id"), nullable=True)
     created_at = db.Column(
         db.DateTime,
@@ -188,6 +189,7 @@ class Complaint(db.Model):
             "report_count": self.report_count,
             "detected_issue": self.detected_issue,
             "suggested_action": self.suggested_action,
+            "transcription": self.transcription,
             "department_id": self.department_id,
             "created_at": self.created_at.isoformat(),
         }
@@ -275,6 +277,7 @@ def init_db():
             "ai_source",
             "parent_id",
             "report_count",
+            "transcription",
         }
         if not required_cols.issubset(set(columns)):
             print("Detected missing columns in complaint table; dropping and recreating database...")
@@ -422,6 +425,24 @@ def report(category):
         photo.save(photo_save_path)
         photo_rel_path = f"uploads/{unique_filename}"
 
+        # Check for optional citizen voice recording
+        audio = request.files.get("audio")
+        audio_save_path = None
+        audio_rel_path = None
+        if audio and audio.filename:
+            safe_audio_name = secure_filename(audio.filename) or "voice.webm"
+            audio_ext = os.path.splitext(safe_audio_name)[1].lower()
+            if audio_ext not in [".webm", ".wav", ".mp3", ".ogg", ".m4a", ".aac"]:
+                audio_ext = ".webm"
+            unique_audio_name = f"voice_{uuid.uuid4().hex[:14]}{audio_ext}"
+            audio_save_path = os.path.join(app.config["UPLOAD_FOLDER"], unique_audio_name)
+            audio.save(audio_save_path)
+            if os.path.exists(audio_save_path) and os.path.getsize(audio_save_path) > 0:
+                audio_rel_path = f"uploads/{unique_audio_name}"
+            else:
+                audio_save_path = None
+                audio_rel_path = None
+
         # Check for open complaint of same category within 50m in last 30 days
         nearby_parent, dist_m = find_nearby_open_complaint(norm_cat, latitude, longitude, max_meters=50.0)
         parent_id = nearby_parent.id if nearby_parent else None
@@ -434,6 +455,7 @@ def report(category):
             issue_type=issue_type,
             description=description or f"{issue_type} reported in Tumakuru",
             photo_path=photo_rel_path,
+            audio_path=audio_rel_path,
             latitude=latitude,
             longitude=longitude,
             address_text=address_text,
@@ -462,12 +484,13 @@ def report(category):
 
         db.session.commit()
 
-        # Execute AI triage analysis
+        # Execute AI triage analysis (with optional audio note)
         triage = analyze_complaint(
             category=norm_cat,
             issue_type=issue_type,
             description=description,
             photo_path=photo_save_path,
+            audio_path=audio_save_path,
         )
 
         # Store AI triage results on complaint
@@ -479,6 +502,14 @@ def report(category):
         complaint.ai_source = triage.get("ai_source", "gemini")
         complaint.detected_issue = triage.get("detected_issue") or issue_type
         complaint.suggested_action = triage.get("suggested_action")
+
+        # Audio transcript handling (Kannada / Hindi / English)
+        transcription = triage.get("transcription")
+        if transcription:
+            complaint.transcription = transcription
+            # If description field is empty or generic, use the translated transcript
+            if not description or not description.strip() or description.strip() == f"{issue_type} reported in Tumakuru":
+                complaint.description = transcription.strip()
 
         # Department assignment: choose seeded department of matching category
         rec_cat = triage.get("recommended_department_type") or norm_cat

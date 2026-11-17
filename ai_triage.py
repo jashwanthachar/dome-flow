@@ -57,6 +57,14 @@ class TriageResult(BaseModel):
         le=1.0,
         description="Confidence score between 0.0 and 1.0 reflecting certainty in detection."
     )
+    transcription: Optional[str] = Field(
+        default=None,
+        description="If citizen audio is attached, provide English translation/transcript of Kannada, Hindi or English speech. Return null if no audio was provided."
+    )
+    original_language: Optional[str] = Field(
+        default=None,
+        description="Spoken language: 'Kannada', 'Hindi', 'English', or null if no audio."
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -293,6 +301,8 @@ def get_rule_based_fallback(
         "recommended_department_type": cat_key,
         "confidence": 0.75,
         "ai_source": "fallback",
+        "transcription": None,
+        "original_language": None,
     }
 
 
@@ -356,6 +366,19 @@ def _sanitize_result(raw_dict: Dict[str, Any], fallback: Dict[str, Any]) -> Dict
     if ai_source not in ("gemini", "fallback"):
         ai_source = fallback.get("ai_source", "gemini")
 
+    # Audio voice transcription and language
+    transcription = raw_dict.get("transcription")
+    if transcription:
+        transcription = str(transcription).strip() or None
+    else:
+        transcription = fallback.get("transcription")
+
+    original_language = raw_dict.get("original_language")
+    if original_language:
+        original_language = str(original_language).strip() or None
+    else:
+        original_language = fallback.get("original_language")
+
     return {
         "detected_issue": detected_issue,
         "image_matches_report": image_matches_report,
@@ -366,6 +389,8 @@ def _sanitize_result(raw_dict: Dict[str, Any], fallback: Dict[str, Any]) -> Dict
         "recommended_department_type": dept_type,
         "confidence": confidence,
         "ai_source": ai_source,
+        "transcription": transcription,
+        "original_language": original_language,
     }
 
 
@@ -376,9 +401,11 @@ def _call_gemini_api(
     issue_type: str,
     description: Optional[str],
     photo_path: str,
+    audio_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Internal helper to call Gemini API via google-genai SDK with structured output.
+    Supports multimodal input (photo + voice recording in Kannada/Hindi/English).
     """
     from google import genai
     from google.genai import types
@@ -405,7 +432,7 @@ def _call_gemini_api(
     if not img_bytes:
         raise ValueError("Complaint photo file is empty (0 bytes).")
 
-    # Determine MIME type
+    # Determine image MIME type
     mime_type, _ = mimetypes.guess_type(resolved_path)
     if not mime_type or not mime_type.startswith("image/"):
         ext = os.path.splitext(resolved_path)[1].lower()
@@ -423,13 +450,51 @@ def _call_gemini_api(
     cat_key = (category or "road").strip().lower()
     system_instruction = CATEGORY_SYSTEM_PROMPTS.get(cat_key, CATEGORY_SYSTEM_PROMPTS["road"])
 
+    contents = [image_part]
+
+    audio_prompt_part = ""
+    # Process optional citizen voice recording
+    if audio_path:
+        resolved_audio = os.path.abspath(audio_path) if not os.path.isabs(audio_path) else audio_path
+        if os.path.exists(resolved_audio) and os.path.getsize(resolved_audio) > 0:
+            try:
+                with open(resolved_audio, "rb") as af:
+                    audio_bytes = af.read()
+
+                audio_ext = os.path.splitext(resolved_audio)[1].lower()
+                audio_mime_map = {
+                    ".webm": "audio/webm",
+                    ".wav": "audio/wav",
+                    ".mp3": "audio/mp3",
+                    ".ogg": "audio/ogg",
+                    ".m4a": "audio/m4a",
+                    ".aac": "audio/aac",
+                }
+                audio_mime = audio_mime_map.get(audio_ext, "audio/webm")
+                audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=audio_mime)
+                contents.append(audio_part)
+
+                audio_prompt_part = (
+                    "\nAUDIO VOICE NOTE INSTRUCTIONS:\n"
+                    "- An audio recording from the citizen in Tumakuru is attached.\n"
+                    "- The citizen may speak in Kannada, Hindi, or English (or code-switch between them).\n"
+                    "- Accurately transcribe their spoken grievance and translate it into clear English.\n"
+                    "- Set 'transcription' to this clear English translation.\n"
+                    "- Set 'original_language' to the detected language ('Kannada', 'Hindi', 'English', or 'Mixed').\n"
+                    "- Factor what they spoke into your assessment of the detected issue and severity.\n"
+                )
+            except Exception as e:
+                logger.warning("Could not read citizen audio recording (%s); proceeding with photo only.", e)
+
     user_prompt = (
         f"Grievance Report Submission Details:\n"
         f"- Municipal Category: {category}\n"
         f"- Citizen Selected Issue Type: {issue_type}\n"
-        f"- Citizen Description: {description.strip() if description and description.strip() else 'None provided'}\n\n"
-        f"Analyze the attached grievance photo and provide structured triage data according to the schema."
+        f"- Citizen Description: {description.strip() if description and description.strip() else 'None provided'}\n"
+        f"{audio_prompt_part}\n"
+        f"Analyze the attached grievance photo (and voice recording if attached) and provide structured triage data according to the schema."
     )
+    contents.append(user_prompt)
 
     config = types.GenerateContentConfig(
         system_instruction=system_instruction,
@@ -439,11 +504,30 @@ def _call_gemini_api(
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
 
-    response = client.models.generate_content(
-        model=model_name,
-        contents=[image_part, user_prompt],
-        config=config,
-    )
+    try:
+        response = client.models.generate_content(
+            model=model_name,
+            contents=contents,
+            config=config,
+        )
+    except Exception as exc:
+        # Fallback gracefully if audio caused failure: retry with image only!
+        if len(contents) > 2:
+            logger.warning("Gemini multimodal call with audio failed (%s); retrying with photo only...", exc)
+            fallback_prompt = (
+                f"Grievance Report Submission Details:\n"
+                f"- Municipal Category: {category}\n"
+                f"- Citizen Selected Issue Type: {issue_type}\n"
+                f"- Citizen Description: {description.strip() if description and description.strip() else 'None provided'}\n\n"
+                f"Analyze the attached grievance photo and provide structured triage data."
+            )
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[image_part, fallback_prompt],
+                config=config,
+            )
+        else:
+            raise exc
 
     raw_text = response.text or "{}"
     data = json.loads(raw_text)
@@ -459,15 +543,18 @@ def analyze_complaint(
     issue_type: str,
     description: Optional[str] = None,
     photo_path: Optional[str] = None,
+    audio_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Analyze a citizen grievance using Gemini multimodal AI with full fallback protection.
+    Accepts both photo and optional citizen voice recording (Kannada/Hindi/English).
 
     Parameters:
         category: "road", "pollution", or "water"
         issue_type: Specific issue type (e.g. "Pothole", "Burst pipe", "Garbage burning")
         description: Optional citizen text description
         photo_path: Path to the uploaded photo file on disk
+        audio_path: Optional path to recorded citizen audio file on disk
 
     Returns:
         Structured JSON dictionary containing:
@@ -479,6 +566,8 @@ def analyze_complaint(
         - suggested_action (str)
         - recommended_department_type (str: 'road', 'pollution', or 'water')
         - confidence (float: 0.0-1.0)
+        - transcription (Optional[str]: English translation of audio)
+        - original_language (Optional[str])
     """
     fallback = get_rule_based_fallback(category, issue_type, description)
 
@@ -504,6 +593,7 @@ def analyze_complaint(
                 issue_type=issue_type,
                 description=description,
                 photo_path=photo_path,
+                audio_path=audio_path,
             )
             raw_data = future.result(timeout=API_TIMEOUT_SECONDS)
 

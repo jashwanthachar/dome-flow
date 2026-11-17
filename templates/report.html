@@ -116,13 +116,70 @@
         <input type="hidden" name="address_text" id="input-address" value="Tumakuru City">
       </div>
 
-      <!-- 4. Description (Optional) -->
+      <!-- 4. Description & Voice Recording -->
       <div class="form-group">
-        <label for="description" class="form-label">
-          <span>Description</span>
-          <span class="optional-tag">(Optional)</span>
-        </label>
-        <textarea name="description" id="description" rows="3" class="form-textarea" placeholder="Add landmarks or details to help Tumakuru ward officers identify the issue..."></textarea>
+        <div class="label-row-with-voice">
+          <label for="description" class="form-label" style="margin-bottom: 0;">
+            <span>Description</span>
+            <span class="optional-tag">(Optional)</span>
+          </label>
+        </div>
+
+        <!-- Voice Recorder Card (MediaRecorder API - Max 30s) -->
+        <div class="voice-recorder-card" id="voice-recorder-card">
+          <!-- State 1: Initial Prompt Button -->
+          <div class="voice-initial-view" id="voice-initial-view">
+            <button type="button" class="btn-voice-record" id="btn-start-record">
+              <span class="mic-icon-circle">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                  <line x1="12" y1="19" x2="12" y2="22"/>
+                </svg>
+              </span>
+              <div class="voice-btn-text-wrap">
+                <span class="voice-btn-main">Speak your complaint</span>
+                <span class="voice-btn-sub">Kannada, Hindi or English &bull; Max 30s</span>
+              </div>
+            </button>
+          </div>
+
+          <!-- State 2: Active Recording View -->
+          <div class="voice-recording-view" id="voice-recording-view" style="display: none;">
+            <div class="recording-badge">
+              <span class="pulse-rec-dot"></span>
+              <span class="rec-label-text">RECORDING...</span>
+              <span class="rec-timer-countdown" id="rec-timer">00:00 / 00:30</span>
+            </div>
+            <button type="button" class="btn-stop-record" id="btn-stop-record">
+              <span class="stop-icon-sq"></span>
+              <span>Stop &amp; Attach</span>
+            </button>
+          </div>
+
+          <!-- State 3: Recorded Preview with Re-record Option -->
+          <div class="voice-preview-view" id="voice-preview-view" style="display: none;">
+            <div class="audio-player-row">
+              <div class="voice-attached-badge">
+                <span class="voice-chk-icon">✓</span>
+                <span>Voice Note Attached</span>
+              </div>
+              <button type="button" class="btn-rerecord" id="btn-rerecord">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                  <path d="M3 3v5h5"/>
+                </svg>
+                <span>Re-record</span>
+              </button>
+            </div>
+            <audio id="audio-playback" controls class="custom-audio-player"></audio>
+          </div>
+
+          <!-- Hidden file input holding the recorded audio blob for submission -->
+          <input type="file" name="audio" id="audio-file-input" accept="audio/*" style="display: none;">
+        </div>
+
+        <textarea name="description" id="description" rows="3" class="form-textarea" placeholder="Or type landmarks and details to help Tumakuru municipal engineers..."></textarea>
       </div>
 
       <!-- 5. Submit Button -->
@@ -258,6 +315,132 @@
         { enableHighAccuracy: true, timeout: 8000 }
       );
     });
+
+    // -------------------------------------------------------------
+    // Voice Recording (Browser MediaRecorder API - Max 30 seconds)
+    // -------------------------------------------------------------
+    const btnStartRecord = document.getElementById('btn-start-record');
+    const btnStopRecord = document.getElementById('btn-stop-record');
+    const btnRerecord = document.getElementById('btn-rerecord');
+    const voiceInitialView = document.getElementById('voice-initial-view');
+    const voiceRecordingView = document.getElementById('voice-recording-view');
+    const voicePreviewView = document.getElementById('voice-preview-view');
+    const recTimer = document.getElementById('rec-timer');
+    const audioPlayback = document.getElementById('audio-playback');
+    const audioFileInput = document.getElementById('audio-file-input');
+
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let recordInterval = null;
+    let recordSeconds = 0;
+    const MAX_DURATION = 30;
+
+    function formatRecTime(sec) {
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
+    if (btnStartRecord) {
+      btnStartRecord.addEventListener('click', async () => {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          alert("Your browser does not support audio recording. Please type your description instead.");
+          return;
+        }
+
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+          let options = {};
+          if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+            options = { mimeType: 'audio/webm;codecs=opus' };
+          } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+            options = { mimeType: 'audio/webm' };
+          } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+            options = { mimeType: 'audio/mp4' };
+          }
+
+          mediaRecorder = new MediaRecorder(stream, options);
+          audioChunks = [];
+
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data && event.data.size > 0) {
+              audioChunks.push(event.data);
+            }
+          };
+
+          mediaRecorder.onstop = () => {
+            // Stop hardware microphone tracks
+            stream.getTracks().forEach((track) => track.stop());
+            clearInterval(recordInterval);
+
+            if (audioChunks.length > 0) {
+              const mime = mediaRecorder.mimeType || 'audio/webm';
+              const ext = mime.includes('mp4') ? 'm4a' : 'webm';
+              const audioBlob = new Blob(audioChunks, { type: mime });
+              const audioUrl = URL.createObjectURL(audioBlob);
+              audioPlayback.src = audioUrl;
+
+              // Attach to form input via DataTransfer
+              try {
+                const audioFile = new File([audioBlob], `voice_complaint_${Date.now()}.${ext}`, { type: mime });
+                const dt = new DataTransfer();
+                dt.items.add(audioFile);
+                audioFileInput.files = dt.files;
+              } catch (e) {
+                console.warn('DataTransfer unavailable, using fallback Blob handling', e);
+              }
+
+              voiceRecordingView.style.display = 'none';
+              voicePreviewView.style.display = 'flex';
+            } else {
+              voiceRecordingView.style.display = 'none';
+              voiceInitialView.style.display = 'block';
+            }
+          };
+
+          mediaRecorder.start(250);
+          recordSeconds = 0;
+          recTimer.textContent = `00:00 / 00:${MAX_DURATION}`;
+
+          voiceInitialView.style.display = 'none';
+          voiceRecordingView.style.display = 'flex';
+
+          recordInterval = setInterval(() => {
+            recordSeconds++;
+            recTimer.textContent = `${formatRecTime(recordSeconds)} / 00:${MAX_DURATION}`;
+            if (recordSeconds >= MAX_DURATION) {
+              if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+              }
+            }
+          }, 1000);
+
+        } catch (err) {
+          console.error("Audio recording permission error:", err);
+          alert("Could not access microphone. Please allow microphone access in your browser to speak your complaint.");
+        }
+      });
+    }
+
+    if (btnStopRecord) {
+      btnStopRecord.addEventListener('click', () => {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+          mediaRecorder.stop();
+        }
+      });
+    }
+
+    if (btnRerecord) {
+      btnRerecord.addEventListener('click', () => {
+        clearInterval(recordInterval);
+        audioPlayback.src = '';
+        audioFileInput.value = '';
+        audioChunks = [];
+        voicePreviewView.style.display = 'none';
+        voiceInitialView.style.display = 'block';
+      });
+    }
 
     // Invalidate map size on window load
     setTimeout(() => { map.invalidateSize(); }, 250);
