@@ -6,7 +6,8 @@ A modern civic grievance reporting and resolution platform for Tumakuru.
 import os
 import json
 import uuid
-from datetime import datetime, timezone
+import math
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from flask_sqlalchemy import SQLAlchemy
@@ -295,6 +296,61 @@ def generate_tracking_id():
     return candidate
 
 
+def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate the great-circle distance in meters between two coordinates."""
+    R = 6371000.0  # Earth radius in meters
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+
+    a = (
+        math.sin(delta_phi / 2.0) ** 2
+        + math.cos(phi1) * math.cos(phi2) * (math.sin(delta_lambda / 2.0) ** 2)
+    )
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return R * c
+
+
+def find_nearby_open_complaint(category: str, latitude: float, longitude: float, max_meters: float = 50.0):
+    """
+    Find the closest open (not Resolved) complaint of the same category
+    within max_meters submitted in the last 30 days.
+    """
+    now_utc = datetime.now(timezone.utc)
+    cutoff_utc = now_utc - timedelta(days=30)
+    cutoff_naive = datetime.utcnow() - timedelta(days=30)
+
+    # Query all active (not Resolved) complaints in same category
+    candidates = Complaint.query.filter(
+        Complaint.category == category,
+        Complaint.status != "Resolved",
+        Complaint.latitude.isnot(None),
+        Complaint.longitude.isnot(None)
+    ).all()
+
+    closest_parent = None
+    min_dist = float("inf")
+
+    for cand in candidates:
+        if cand.created_at:
+            cand_time = cand.created_at
+            if cand_time.tzinfo is not None:
+                if cand_time < cutoff_utc:
+                    continue
+            else:
+                if cand_time < cutoff_naive:
+                    continue
+
+        dist = haversine_distance(latitude, longitude, cand.latitude, cand.longitude)
+        if dist <= max_meters and dist < min_dist:
+            min_dist = dist
+            # Resolve to root parent if candidate is already a child
+            closest_parent = cand.parent if cand.parent else cand
+
+    return closest_parent, min_dist
+
+
 # Automatically run on startup
 with app.app_context():
     init_db()
@@ -366,6 +422,10 @@ def report(category):
         photo.save(photo_save_path)
         photo_rel_path = f"uploads/{unique_filename}"
 
+        # Check for open complaint of same category within 50m in last 30 days
+        nearby_parent, dist_m = find_nearby_open_complaint(norm_cat, latitude, longitude, max_meters=50.0)
+        parent_id = nearby_parent.id if nearby_parent else None
+
         # Generate tracking ID and save Complaint
         tracking_id = generate_tracking_id()
         complaint = Complaint(
@@ -378,6 +438,7 @@ def report(category):
             longitude=longitude,
             address_text=address_text,
             status="Submitted",
+            parent_id=parent_id,
             report_count=1,
         )
         db.session.add(complaint)
@@ -390,6 +451,15 @@ def report(category):
             note="Grievance submitted by citizen via CivicEye web portal."
         )
         db.session.add(status_entry)
+
+        if nearby_parent:
+            nearby_entry = StatusHistory(
+                complaint_id=complaint.id,
+                status="Submitted",
+                note=f"Linked to nearby active grievance {nearby_parent.tracking_id} ({int(dist_m)}m away)."
+            )
+            db.session.add(nearby_entry)
+
         db.session.commit()
 
         # Execute AI triage analysis
@@ -425,6 +495,32 @@ def report(category):
             note="AI triage completed"
         )
         db.session.add(ai_history)
+
+        # If linked to a parent complaint, update parent metrics
+        if nearby_parent:
+            nearby_parent.report_count = (nearby_parent.report_count or 1) + 1
+
+            # Raise parent's severity by 1 (max 5) once report_count reaches 3
+            if nearby_parent.report_count >= 3:
+                curr_sev = nearby_parent.severity or 1
+                if curr_sev < 5:
+                    nearby_parent.severity = min(5, curr_sev + 1)
+
+                # Add crowd reason "Reported by N citizens"
+                reasons = list(nearby_parent.reasons_list)
+                crowd_reason = f"Reported by {nearby_parent.report_count} citizens"
+                reasons = [r for r in reasons if not r.startswith("Reported by ")]
+                reasons.append(crowd_reason)
+                nearby_parent.severity_reasons = json.dumps(reasons)
+
+            # Record duplicate linkage in parent's history
+            parent_history = StatusHistory(
+                complaint_id=nearby_parent.id,
+                status=nearby_parent.status,
+                note=f"Additional grievance report linked ({tracking_id}) from citizen within {int(dist_m)}m. Total reports: {nearby_parent.report_count}."
+            )
+            db.session.add(parent_history)
+
         db.session.commit()
 
         return redirect(url_for("success", tracking_id=tracking_id))
