@@ -11,3 +11,5 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: gemini-3.1-flash-lite
+      - key: DEBUG_TOKEN
+        value: civiceye123
