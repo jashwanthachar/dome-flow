@@ -12,17 +12,28 @@
   <div class="mobile-container">
     <!-- Header -->
     <header class="app-header">
-      <div class="brand-row">
-        <div class="logo-mark">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
-            <circle cx="12" cy="12" r="3"/>
+      <div class="brand-row" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div class="logo-mark">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </div>
+          <div class="brand-text">
+            <h1 class="brand-name">CivicEye</h1>
+            <span class="city-tag">Tumakuru</span>
+          </div>
+        </div>
+        <a href="/dashboard" class="header-dashboard-link" id="header-link-dashboard" title="View Public Dashboard">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <rect width="7" height="9" x="3" y="3" rx="1"/>
+            <rect width="7" height="5" x="14" y="3" rx="1"/>
+            <rect width="7" height="9" x="14" y="12" rx="1"/>
+            <rect width="7" height="5" x="3" y="16" rx="1"/>
           </svg>
-        </div>
-        <div class="brand-text">
-          <h1 class="brand-name">CivicEye</h1>
-          <span class="city-tag">Tumakuru</span>
-        </div>
+          <span>Public Dashboard</span>
+        </a>
       </div>
       <p class="hero-tagline">Report it. Track it. See it fixed.</p>
       <p class="hero-subtext">Select a category to report a public issue in your ward</p>

@@ -909,13 +909,184 @@ def admin_complaint_detail(complaint_id):
 
 @app.route("/dashboard")
 def dashboard():
-    """Placeholder page for public transparency dashboard."""
+    """
+    Public civic transparency dashboard for Tumakuru:
+    - No login required.
+    - Total unique issues (parent complaints) & total citizen reports counted separately.
+    - Open, resolved, and average resolution time (hours/days).
+    - Bar chart data of complaints by category (for Chart.js).
+    - Department performance table with open, resolved, and avg resolution time.
+    - Leaflet map with a marker per unique issue, coloured by severity, with category and status in popups.
+    - "Recently fixed" list with before/after photos where available.
+    - Strict privacy: never exposes personal data or audio.
+    """
+    # 1. Unique complaints (parent complaints only)
+    unique_complaints = (
+        Complaint.query.filter(Complaint.parent_id.is_(None))
+        .order_by(Complaint.created_at.desc())
+        .all()
+    )
+    total_unique = len(unique_complaints)
+
+    # Total citizen reports (sum of report_count across unique issues, or total complaint rows)
+    total_reports_sum = (
+        db.session.query(db.func.sum(Complaint.report_count))
+        .filter(Complaint.parent_id.is_(None))
+        .scalar()
+    )
+    all_complaints_count = Complaint.query.count()
+    total_citizen_reports = int(total_reports_sum) if total_reports_sum else all_complaints_count
+    if total_citizen_reports < total_unique:
+        total_citizen_reports = total_unique
+
+    # Status counts for unique issues
+    open_complaints = [c for c in unique_complaints if c.status != "Resolved"]
+    resolved_complaints = [c for c in unique_complaints if c.status == "Resolved"]
+    open_count = len(open_complaints)
+    resolved_count = len(resolved_complaints)
+
+    # Resolution duration helper
+    def get_resolution_seconds(c):
+        """Calculates seconds elapsed between complaint creation and resolution."""
+        sh = (
+            StatusHistory.query.filter_by(complaint_id=c.id, status="Resolved")
+            .order_by(StatusHistory.changed_at.desc())
+            .first()
+        )
+        if not sh or not c.created_at:
+            return None
+        t_start = c.created_at
+        t_end = sh.changed_at
+        if t_start and t_end:
+            if t_start.tzinfo is not None and t_end.tzinfo is None:
+                t_end = t_end.replace(tzinfo=t_start.tzinfo)
+            elif t_start.tzinfo is None and t_end.tzinfo is not None:
+                t_start = t_start.replace(tzinfo=t_end.tzinfo)
+            diff = (t_end - t_start).total_seconds()
+            return max(0.0, diff)
+        return None
+
+    def format_resolution_time(seconds):
+        if seconds is None:
+            return "N/A"
+        hours = seconds / 3600.0
+        if hours < 1:
+            mins = max(1, int(seconds / 60.0))
+            return f"{mins}m"
+        elif hours < 24:
+            return f"{hours:.1f} hrs" if (hours != int(hours) and hours < 10) else f"{round(hours)} hrs"
+        else:
+            days = hours / 24.0
+            return f"{days:.1f} days" if (days != int(days) and days < 10) else f"{round(days)} days"
+
+    # Global average resolution time
+    valid_durations = [get_resolution_seconds(c) for c in resolved_complaints]
+    valid_durations = [d for d in valid_durations if d is not None]
+    avg_resolution_seconds = (sum(valid_durations) / len(valid_durations)) if valid_durations else None
+    avg_resolution_time_display = format_resolution_time(avg_resolution_seconds)
+
+    # 2. Complaints by category for Chart.js
+    categories_spec = [
+        {"key": "road", "label": "Road Damage", "color": "rgba(56, 189, 248, 0.85)", "border": "#38bdf8"},
+        {"key": "pollution", "label": "Sanitation & Pollution", "color": "rgba(52, 211, 153, 0.85)", "border": "#34d399"},
+        {"key": "water", "label": "Water Supply & Sewage", "color": "rgba(96, 165, 250, 0.85)", "border": "#60a5fa"},
+    ]
+    category_chart_data = {
+        "labels": [cat["label"] for cat in categories_spec],
+        "keys": [cat["key"] for cat in categories_spec],
+        "counts": [
+            sum(1 for c in unique_complaints if c.category == cat["key"])
+            for cat in categories_spec
+        ],
+        "backgroundColors": [cat["color"] for cat in categories_spec],
+        "borderColors": [cat["border"] for cat in categories_spec],
+    }
+
+    # 3. Department performance table
+    departments = Department.query.order_by(Department.category.asc(), Department.name.asc()).all()
+    dept_stats = []
+    for dept in departments:
+        dept_parents = [c for c in unique_complaints if c.department_id == dept.id]
+        d_open = sum(1 for c in dept_parents if c.status != "Resolved")
+        d_resolved = sum(1 for c in dept_parents if c.status == "Resolved")
+        d_durations = [get_resolution_seconds(c) for c in dept_parents if c.status == "Resolved"]
+        d_durations = [d for d in d_durations if d is not None]
+        d_avg_sec = (sum(d_durations) / len(d_durations)) if d_durations else None
+
+        dept_stats.append({
+            "id": dept.id,
+            "name": dept.name,
+            "category": dept.category,
+            "open_count": d_open,
+            "resolved_count": d_resolved,
+            "total_count": len(dept_parents),
+            "avg_resolution_time": format_resolution_time(d_avg_sec),
+        })
+
+    # 4. Leaflet map markers for unique issues
+    map_markers = []
+    for c in unique_complaints:
+        if c.latitude is not None and c.longitude is not None:
+            cat_label = (
+                "Road Damage" if c.category == "road"
+                else "Sanitation & Pollution" if c.category == "pollution"
+                else "Water Supply & Sewage"
+            )
+            map_markers.append({
+                "id": c.id,
+                "tracking_id": c.tracking_id,
+                "lat": float(c.latitude),
+                "lng": float(c.longitude),
+                "category": c.category,
+                "category_label": cat_label,
+                "issue_type": c.issue_type or cat_label,
+                "status": c.status,
+                "severity": c.severity or 3,
+                "address": c.address_text or "Tumakuru, Karnataka",
+                "reports": c.report_count or 1,
+            })
+
+    # 5. Recently Fixed grievances (with before/after photos where available)
+    # Strictly no personal data or audio
+    recently_fixed_raw = [c for c in unique_complaints if c.status == "Resolved"]
+    recently_fixed_list = []
+    for c in recently_fixed_raw[:8]:
+        res_sec = get_resolution_seconds(c)
+        sh_res = (
+            StatusHistory.query.filter_by(complaint_id=c.id, status="Resolved")
+            .order_by(StatusHistory.changed_at.desc())
+            .first()
+        )
+        resolved_date_str = (
+            sh_res.changed_at.strftime("%d %b %Y, %I:%M %p")
+            if sh_res and sh_res.changed_at
+            else c.created_at.strftime("%d %b %Y")
+        )
+        recently_fixed_list.append({
+            "id": c.id,
+            "tracking_id": c.tracking_id,
+            "category": c.category,
+            "issue_type": c.issue_type or "Civic Grievance",
+            "description": c.description,
+            "address_text": c.address_text or "Tumakuru, Karnataka",
+            "photo_path": c.photo_path,
+            "after_photo_path": c.after_photo_path,
+            "resolution_time": format_resolution_time(res_sec),
+            "resolved_date": resolved_date_str,
+            "report_count": c.report_count or 1,
+        })
+
     return render_template(
-        "placeholder.html",
-        title="Public Dashboard",
-        heading="Tumakuru Public Dashboard",
-        icon="📊",
-        message="Public transparency metrics and ward-level resolution stats across Tumakuru City Corporation."
+        "public_dashboard.html",
+        total_unique=total_unique,
+        total_citizen_reports=total_citizen_reports,
+        open_count=open_count,
+        resolved_count=resolved_count,
+        avg_resolution_time=avg_resolution_time_display,
+        category_chart_data=category_chart_data,
+        dept_stats=dept_stats,
+        map_markers=map_markers,
+        recently_fixed=recently_fixed_list,
     )
 
 

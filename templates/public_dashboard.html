@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0f172a">
+  <title>Public Dashboard - CivicEye Tumakuru</title>
+  
+  <!-- Leaflet OpenStreetMap CDN -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <!-- Chart.js from cdnjs -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="public-dashboard-body">
+  <div class="dashboard-shell">
+    
+    <!-- Top Navigation Header -->
+    <header class="dashboard-navbar">
+      <div class="dash-nav-left">
+        <a href="/" class="dash-back-btn" title="Back to citizen portal">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 12H5M12 19l-7-7 7-7"/>
+          </svg>
+          <span>Home</span>
+        </a>
+        <div class="dash-brand-wrap">
+          <div class="logo-mark" style="width: 38px; height: 38px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </div>
+          <div>
+            <h1 class="dash-title">CivicEye Public Transparency</h1>
+            <span class="dash-subtitle">Tumakuru City Corporation &bull; Civic Performance &amp; Resolution Metrics</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="dash-nav-right">
+        <a href="/track" class="btn-dash-action" title="Track a complaint by ID">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/>
+            <path d="m21 21-4.3-4.3"/>
+          </svg>
+          <span>Track Status</span>
+        </a>
+        <a href="/" class="btn-dash-action primary" title="File a new grievance">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          <span>Report Issue</span>
+        </a>
+      </div>
+    </header>
+
+    <main class="dashboard-content">
+      
+      <!-- 1. KPI Cards Row -->
+      <section class="kpi-grid">
+        <!-- Total Complaints -->
+        <div class="kpi-card" id="kpi-total">
+          <div class="kpi-header-row">
+            <span class="kpi-label">Total Unique Issues</span>
+            <span class="kpi-icon-pill" style="background: rgba(56, 189, 248, 0.12); color: #38bdf8;">📋</span>
+          </div>
+          <div class="kpi-value-row">
+            <span class="kpi-number">{{ total_unique }}</span>
+            <span class="kpi-badge-blue">Parent Issues</span>
+          </div>
+          <p class="kpi-subtext">
+            <strong>{{ total_citizen_reports }}</strong> total citizen reports registered city-wide
+          </p>
+        </div>
+
+        <!-- Open Issues -->
+        <div class="kpi-card" id="kpi-open">
+          <div class="kpi-header-row">
+            <span class="kpi-label">Open Grievances</span>
+            <span class="kpi-icon-pill" style="background: rgba(245, 158, 11, 0.12); color: #f59e0b;">⏳</span>
+          </div>
+          <div class="kpi-value-row">
+            <span class="kpi-number" style="color: #f59e0b;">{{ open_count }}</span>
+            <span class="kpi-badge-amber">In Progress</span>
+          </div>
+          <p class="kpi-subtext">
+            Under active municipal inspection &amp; repair
+          </p>
+        </div>
+
+        <!-- Resolved Issues -->
+        <div class="kpi-card" id="kpi-resolved">
+          <div class="kpi-header-row">
+            <span class="kpi-label">Resolved Issues</span>
+            <span class="kpi-icon-pill" style="background: rgba(16, 185, 129, 0.12); color: #10b981;">✅</span>
+          </div>
+          <div class="kpi-value-row">
+            <span class="kpi-number" style="color: #10b981;">{{ resolved_count }}</span>
+            <span class="kpi-badge-green">Fixed</span>
+          </div>
+          <p class="kpi-subtext">
+            Verified on-site by municipal departments
+          </p>
+        </div>
+
+        <!-- Average Resolution Time -->
+        <div class="kpi-card" id="kpi-avg-time">
+          <div class="kpi-header-row">
+            <span class="kpi-label">Avg. Resolution Time</span>
+            <span class="kpi-icon-pill" style="background: rgba(14, 165, 233, 0.12); color: #0ea5e9;">⚡</span>
+          </div>
+          <div class="kpi-value-row">
+            <span class="kpi-number" style="color: #38bdf8;">{{ avg_resolution_time }}</span>
+            <span class="kpi-badge-cyan">City Avg</span>
+          </div>
+          <p class="kpi-subtext">
+            From citizen submission to department resolution
+          </p>
+        </div>
+      </section>
+
+      <!-- 2. Charts & Map Split Section -->
+      <div class="dash-grid-2col">
+        
+        <!-- (A) Bar Chart: Complaints by Category -->
+        <div class="dash-card">
+          <div class="dash-card-header">
+            <div>
+              <h2 class="dash-card-title">Grievances by Category</h2>
+              <p class="dash-card-desc">Volume of unique civic reports categorized across Tumakuru</p>
+            </div>
+            <span class="dash-card-badge">Chart.js</span>
+          </div>
+          <div class="chart-wrapper">
+            <canvas id="categoryBarChart"></canvas>
+          </div>
+          <div class="category-legend-row">
+            <div class="cat-legend-item">
+              <span class="legend-dot" style="background: #38bdf8;"></span>
+              <span>Road Damage ({{ category_chart_data.counts[0] }})</span>
+            </div>
+            <div class="cat-legend-item">
+              <span class="legend-dot" style="background: #34d399;"></span>
+              <span>Sanitation &amp; Pollution ({{ category_chart_data.counts[1] }})</span>
+            </div>
+            <div class="cat-legend-item">
+              <span class="legend-dot" style="background: #60a5fa;"></span>
+              <span>Water Supply &amp; Sewage ({{ category_chart_data.counts[2] }})</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- (B) Leaflet Map: Unique Issues by Location & Severity -->
+        <div class="dash-card">
+          <div class="dash-card-header">
+            <div>
+              <h2 class="dash-card-title">Tumakuru Civic Issue Map</h2>
+              <p class="dash-card-desc">Unique grievances geographically pinned &amp; coloured by severity</p>
+            </div>
+            <span class="dash-card-badge" id="map-counter-badge">{{ map_markers|length }} Pinned Issues</span>
+          </div>
+          
+          <div id="tumakuruPublicMap" class="dash-leaflet-map"></div>
+
+          <!-- Severity Map Legend -->
+          <div class="map-severity-legend">
+            <span class="legend-title">Severity Level:</span>
+            <div class="severity-scale">
+              <span class="sev-dot-wrap"><span class="sev-dot" style="background: #10b981;"></span>1 Low</span>
+              <span class="sev-dot-wrap"><span class="sev-dot" style="background: #06b6d4;"></span>2 Minor</span>
+              <span class="sev-dot-wrap"><span class="sev-dot" style="background: #f59e0b;"></span>3 Moderate</span>
+              <span class="sev-dot-wrap"><span class="sev-dot" style="background: #f97316;"></span>4 High</span>
+              <span class="sev-dot-wrap"><span class="sev-dot" style="background: #ef4444;"></span>5 Critical</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 3. Department Performance Table -->
+      <section class="dash-card" style="margin-top: 24px;">
+        <div class="dash-card-header">
+          <div>
+            <h2 class="dash-card-title">Department Performance &amp; Accountability</h2>
+            <p class="dash-card-desc">Workload distribution, open backlog, resolved count, and turnaround time per agency</p>
+          </div>
+          <span class="dash-card-badge">{{ dept_stats|length }} Departments</span>
+        </div>
+
+        <div class="table-responsive">
+          <table class="dash-dept-table">
+            <thead>
+              <tr>
+                <th>Department Name</th>
+                <th>Category</th>
+                <th style="text-align: center;">Open</th>
+                <th style="text-align: center;">Resolved</th>
+                <th style="text-align: center;">Total Assigned</th>
+                <th style="text-align: right;">Avg. Resolution Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for dept in dept_stats %}
+              <tr>
+                <td>
+                  <div class="dept-name-cell">
+                    <strong>{{ dept.name }}</strong>
+                  </div>
+                </td>
+                <td>
+                  {% if dept.category == 'road' %}
+                  <span class="dept-pill road">🛣️ Road</span>
+                  {% elif dept.category == 'pollution' %}
+                  <span class="dept-pill pollution">🗑️ Sanitation</span>
+                  {% else %}
+                  <span class="dept-pill water">💧 Water &amp; Sewage</span>
+                  {% endif %}
+                </td>
+                <td style="text-align: center;">
+                  <span class="status-counter-pill open">{{ dept.open_count }}</span>
+                </td>
+                <td style="text-align: center;">
+                  <span class="status-counter-pill resolved">{{ dept.resolved_count }}</span>
+                </td>
+                <td style="text-align: center;">
+                  <span class="total-assigned-num">{{ dept.total_count }}</span>
+                </td>
+                <td style="text-align: right;">
+                  <span class="res-time-pill {% if dept.avg_resolution_time != 'N/A' %}active{% endif %}">
+                    {{ dept.avg_resolution_time }}
+                  </span>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 4. Recently Fixed Grievances (With Before / After Photos) -->
+      <section class="dash-card" style="margin-top: 24px;">
+        <div class="dash-card-header">
+          <div>
+            <h2 class="dash-card-title">Recently Fixed Grievances</h2>
+            <p class="dash-card-desc">Verified municipal resolutions showing before &amp; after work evidence</p>
+          </div>
+          <span class="dash-card-badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border-color: rgba(16, 185, 129, 0.3);">
+            {{ recently_fixed|length }} Fixed Issues
+          </span>
+        </div>
+
+        {% if recently_fixed and recently_fixed|length > 0 %}
+        <div class="recently-fixed-grid">
+          {% for item in recently_fixed %}
+          <div class="fixed-issue-card">
+            <div class="fixed-card-header">
+              <div class="fixed-badge-row">
+                <a href="/track/{{ item.tracking_id }}" class="fixed-tracking-id" title="Track issue details">
+                  {{ item.tracking_id }}
+                </a>
+                {% if item.category == 'road' %}
+                <span class="dept-pill road" style="font-size: 11px;">Road</span>
+                {% elif item.category == 'pollution' %}
+                <span class="dept-pill pollution" style="font-size: 11px;">Sanitation</span>
+                {% else %}
+                <span class="dept-pill water" style="font-size: 11px;">Water</span>
+                {% endif %}
+              </div>
+              <span class="fixed-time-badge">Resolved in {{ item.resolution_time }}</span>
+            </div>
+
+            <!-- Before / After Photos -->
+            <div class="evidence-photos-wrap">
+              <!-- Before Photo -->
+              <div class="evidence-photo-box">
+                <span class="photo-state-tag before">Before</span>
+                {% if item.photo_path %}
+                <img src="/{{ item.photo_path }}" alt="Reported issue photo" class="evidence-img" loading="lazy">
+                {% else %}
+                <div class="no-photo-box">No photo</div>
+                {% endif %}
+              </div>
+
+              <!-- After Photo (or Verified Badge) -->
+              <div class="evidence-photo-box">
+                <span class="photo-state-tag after">Resolved</span>
+                {% if item.after_photo_path %}
+                <img src="/{{ item.after_photo_path }}" alt="Resolution photo" class="evidence-img" loading="lazy">
+                {% else %}
+                <div class="no-after-box">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                    <polyline points="22 4 12 14.01 9 11.01"/>
+                  </svg>
+                  <span>Work Verified</span>
+                  <small>On-site inspection</small>
+                </div>
+                {% endif %}
+              </div>
+            </div>
+
+            <div class="fixed-card-body">
+              <h3 class="fixed-issue-title">{{ item.issue_type }}</h3>
+              <p class="fixed-address">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
+                  <circle cx="12" cy="10" r="3"/>
+                </svg>
+                <span>{{ item.address_text }}</span>
+              </p>
+              <div class="fixed-footer-row">
+                <span class="fixed-reports-count">👥 {{ item.report_count }} citizen report{% if item.report_count > 1 %}s{% endif %}</span>
+                <a href="/track/{{ item.tracking_id }}" class="fixed-track-link">
+                  View Timeline &rarr;
+                </a>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-fixed-state">
+          <div class="empty-state-icon">🛠️</div>
+          <h3 style="color: #ffffff; font-size: 16px; margin-bottom: 6px;">No complaints resolved yet</h3>
+          <p style="color: var(--text-muted); font-size: 14px; max-width: 440px; margin: 0 auto;">
+            As municipal teams triage, assign, and mark grievances as Resolved, verified before and after work evidence will appear here.
+          </p>
+        </div>
+        {% endif %}
+      </section>
+
+    </main>
+
+    <!-- Public Transparency Footer -->
+    <footer class="dash-footer">
+      <div class="footer-meta">
+        <p>Tumakuru City Corporation &bull; CivicEye Public Transparency Portal</p>
+        <p style="margin-top: 6px; font-size: 12px; color: var(--text-muted);">
+          All grievance data is aggregated in real-time. Citizen privacy is strictly protected: personal identities and voice audio are never displayed.
+        </p>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- Chart.js & Leaflet Initialization Scripts -->
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      
+      // -------------------------------------------------------------
+      // 1. Chart.js: Bar Chart of Complaints by Category
+      // -------------------------------------------------------------
+      const chartData = {{ category_chart_data|tojson }};
+      const ctx = document.getElementById('categoryBarChart');
+      
+      if (ctx && window.Chart) {
+        new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: chartData.labels,
+            datasets: [{
+              label: 'Unique Issues Reported',
+              data: chartData.counts,
+              backgroundColor: chartData.backgroundColors,
+              borderColor: chartData.borderColors,
+              borderWidth: 1.5,
+              borderRadius: 8,
+              borderSkipped: false,
+              barThickness: 38,
+              maxBarThickness: 50
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                display: false
+              },
+              tooltip: {
+                backgroundColor: '#1e293b',
+                titleColor: '#ffffff',
+                bodyColor: '#94a3b8',
+                borderColor: 'rgba(255, 255, 255, 0.1)',
+                borderWidth: 1,
+                padding: 12,
+                cornerRadius: 8,
+                callbacks: {
+                  label: function(context) {
+                    return ` ${context.parsed.y} unique civic issue${context.parsed.y === 1 ? '' : 's'}`;
+                  }
+                }
+              }
+            },
+            scales: {
+              x: {
+                grid: {
+                  display: false
+                },
+                ticks: {
+                  color: '#94a3b8',
+                  font: {
+                    family: "'Inter', sans-serif",
+                    size: 12,
+                    weight: '500'
+                  }
+                }
+              },
+              y: {
+                beginAtZero: true,
+                ticks: {
+                  precision: 0,
+                  color: '#94a3b8',
+                  font: {
+                    family: "'Inter', sans-serif",
+                    size: 11
+                  }
+                },
+                grid: {
+                  color: 'rgba(255, 255, 255, 0.06)'
+                }
+              }
+            }
+          }
+        });
+      }
+
+      // -------------------------------------------------------------
+      // 2. Leaflet Map of Tumakuru: Unique Issues Coloured by Severity
+      // -------------------------------------------------------------
+      const mapMarkers = {{ map_markers|tojson }};
+      const tumakuruCenter = [13.3409, 77.1010]; // Center of Tumakuru city
+      
+      const map = L.map('tumakuruPublicMap', {
+        scrollWheelZoom: false
+      }).setView(tumakuruCenter, 13);
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      // Severity color mapping: 1=Green, 2=Cyan, 3=Amber, 4=Orange, 5=Red
+      function getSeverityColor(sev) {
+        switch(parseInt(sev)) {
+          case 1: return '#10b981';
+          case 2: return '#06b6d4';
+          case 3: return '#f59e0b';
+          case 4: return '#f97316';
+          case 5: return '#ef4444';
+          default: return '#f59e0b';
+        }
+      }
+
+      function getStatusColor(status) {
+        switch(status) {
+          case 'Resolved': return '#10b981';
+          case 'In Progress': return '#f59e0b';
+          case 'Assigned': return '#38bdf8';
+          case 'Under Review': return '#a855f7';
+          default: return '#94a3b8';
+        }
+      }
+
+      const bounds = [];
+
+      if (mapMarkers && mapMarkers.length > 0) {
+        mapMarkers.forEach(function (m) {
+          if (m.lat && m.lng) {
+            bounds.push([m.lat, m.lng]);
+            const color = getSeverityColor(m.severity);
+            const statusColor = getStatusColor(m.status);
+
+            // Create customized pulsing Leaflet marker pin coloured by severity
+            const customIcon = L.divIcon({
+              className: 'custom-severity-pin',
+              html: `<div style="
+                width: 26px;
+                height: 26px;
+                background: ${color};
+                border: 2.5px solid #ffffff;
+                border-radius: 50%;
+                box-shadow: 0 0 12px ${color}88, 0 2px 6px rgba(0,0,0,0.5);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 11px;
+                font-weight: 800;
+                color: #ffffff;
+              ">${m.severity}</div>`,
+              iconSize: [26, 26],
+              iconAnchor: [13, 13],
+              popupAnchor: [0, -14]
+            });
+
+            const marker = L.marker([m.lat, m.lng], { icon: customIcon }).addTo(map);
+
+            // Popup showing category, status, tracking ID, issue type, and link
+            const popupHtml = `
+              <div class="dash-map-popup">
+                <div class="popup-top-row">
+                  <span class="popup-track-id">${m.tracking_id}</span>
+                  <span class="popup-status-badge" style="background: ${statusColor}22; color: ${statusColor}; border: 1px solid ${statusColor}44;">
+                    ${m.status}
+                  </span>
+                </div>
+                <div class="popup-issue-title">${m.issue_type}</div>
+                <div class="popup-meta-row">
+                  <span class="popup-cat-tag">${m.category_label}</span>
+                  <span class="popup-sev-badge" style="color: ${color};">Severity ${m.severity}/5</span>
+                </div>
+                <div class="popup-address">${m.address}</div>
+                <div class="popup-action-row">
+                  <a href="/track/${m.tracking_id}" class="popup-track-btn" target="_blank">
+                    Track Grievance &rarr;
+                  </a>
+                </div>
+              </div>
+            `;
+
+            marker.bindPopup(popupHtml);
+          }
+        });
+
+        // Fit map bounds if multiple markers exist
+        if (bounds.length > 1) {
+          map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+        } else if (bounds.length === 1) {
+          map.setView(bounds[0], 14);
+        }
+      }
+
+    });
+  </script>
+</body>
+</html>
