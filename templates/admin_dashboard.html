@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0f172a">
+  <title>Admin Dashboard - CivicEye Tumakuru</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="admin-body">
+  <div class="admin-shell">
+    <!-- Top Admin Navigation Bar -->
+    <header class="admin-navbar">
+      <div class="admin-nav-left">
+        <div class="logo-mark" style="width: 38px; height: 38px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+        </div>
+        <div class="admin-brand">
+          <span class="admin-title">CivicEye Admin</span>
+          <span class="admin-badge">Tumakuru Corporation</span>
+        </div>
+      </div>
+
+      <div class="admin-nav-right">
+        <a href="/" target="_blank" class="btn-nav-link" title="Open citizen portal">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+            <polyline points="15 3 21 3 21 9"/>
+            <line x1="10" y1="14" x2="21" y2="3"/>
+          </svg>
+          <span>Citizen Portal</span>
+        </a>
+        <a href="/admin/logout" class="btn-logout">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+          <span>Logout</span>
+        </a>
+      </div>
+    </header>
+
+    <main class="admin-content">
+      <!-- KPI Stats Row -->
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-val">{{ total_parent_count }}</div>
+          <div class="kpi-label">Parent Grievances</div>
+        </div>
+        <div class="kpi-card kpi-active">
+          <div class="kpi-val">{{ active_count }}</div>
+          <div class="kpi-label">Active / Pending</div>
+        </div>
+        <div class="kpi-card kpi-high">
+          <div class="kpi-val">{{ high_sev_count }}</div>
+          <div class="kpi-label">Critical / High (4-5★)</div>
+        </div>
+        <div class="kpi-card kpi-resolved">
+          <div class="kpi-val">{{ resolved_count }}</div>
+          <div class="kpi-label">Resolved</div>
+        </div>
+      </div>
+
+      <!-- Filter & Sort Bar -->
+      <div class="admin-filter-card">
+        <form action="/admin" method="GET" class="filter-form" id="filter-form">
+          <div class="filter-controls-row">
+            <!-- Category Filter -->
+            <div class="filter-field">
+              <label for="filter-category" class="filter-label">Category</label>
+              <select name="category" id="filter-category" class="filter-select" onchange="this.form.submit()">
+                <option value="all" {% if category_filter == 'all' %}selected{% endif %}>All Categories</option>
+                <option value="road" {% if category_filter == 'road' %}selected{% endif %}>🛣️ Road Damage</option>
+                <option value="pollution" {% if category_filter == 'pollution' %}selected{% endif %}>🏭 Pollution</option>
+                <option value="water" {% if category_filter == 'water' %}selected{% endif %}>🚰 Water Supply</option>
+              </select>
+            </div>
+
+            <!-- Status Filter -->
+            <div class="filter-field">
+              <label for="filter-status" class="filter-label">Status</label>
+              <select name="status" id="filter-status" class="filter-select" onchange="this.form.submit()">
+                <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All Statuses</option>
+                <option value="Submitted" {% if status_filter == 'Submitted' %}selected{% endif %}>Submitted</option>
+                <option value="Under Review" {% if status_filter == 'Under Review' %}selected{% endif %}>Under Review</option>
+                <option value="Assigned" {% if status_filter == 'Assigned' %}selected{% endif %}>Assigned</option>
+                <option value="In Progress" {% if status_filter == 'In Progress' %}selected{% endif %}>In Progress</option>
+                <option value="Resolved" {% if status_filter == 'Resolved' %}selected{% endif %}>Resolved</option>
+              </select>
+            </div>
+
+            <!-- Severity Filter -->
+            <div class="filter-field">
+              <label for="filter-severity" class="filter-label">Severity</label>
+              <select name="severity" id="filter-severity" class="filter-select" onchange="this.form.submit()">
+                <option value="all" {% if severity_filter == 'all' %}selected{% endif %}>All Severities</option>
+                <option value="5" {% if severity_filter == '5' %}selected{% endif %}>5 - Critical</option>
+                <option value="4" {% if severity_filter == '4' %}selected{% endif %}>4 - High</option>
+                <option value="3" {% if severity_filter == '3' %}selected{% endif %}>3 - Moderate</option>
+                <option value="2" {% if severity_filter == '2' %}selected{% endif %}>2 - Low</option>
+                <option value="1" {% if severity_filter == '1' %}selected{% endif %}>1 - Minor</option>
+              </select>
+            </div>
+
+            <!-- Sort By -->
+            <div class="filter-field">
+              <label for="filter-sort" class="filter-label">Sort Order</label>
+              <select name="sort" id="filter-sort" class="filter-select" onchange="this.form.submit()">
+                <option value="default" {% if sort_by == 'default' %}selected{% endif %}>Severity &amp; Reports (Default)</option>
+                <option value="reports" {% if sort_by == 'reports' %}selected{% endif %}>Report Count (High to Low)</option>
+                <option value="date" {% if sort_by == 'date' %}selected{% endif %}>Newest First</option>
+                <option value="status" {% if sort_by == 'status' %}selected{% endif %}>Status Progression</option>
+              </select>
+            </div>
+
+            {% if category_filter != 'all' or status_filter != 'all' or severity_filter != 'all' or sort_by != 'default' %}
+            <div class="filter-reset-wrap">
+              <a href="/admin" class="btn-filter-reset">Reset Filters</a>
+            </div>
+            {% endif %}
+          </div>
+        </form>
+      </div>
+
+      <!-- Grievance Table Card -->
+      <div class="admin-table-card">
+        <div class="table-card-header">
+          <div class="table-title-group">
+            <h2 class="table-title">Parent Grievance Registry</h2>
+            <span class="table-count-badge">{{ complaints|length }} records found</span>
+          </div>
+          <span class="table-legend-note">Duplicates merged under root parent with cumulative citizen report counts</span>
+        </div>
+
+        {% if complaints|length == 0 %}
+        <div class="admin-empty-state">
+          <div class="empty-icon">📭</div>
+          <h3>No Grievances Found</h3>
+          <p>No complaints match your active filter criteria.</p>
+          <a href="/admin" class="btn-sample-id" style="display: inline-block; margin-top: 10px; padding: 6px 14px;">Clear All Filters</a>
+        </div>
+        {% else %}
+        <div class="table-responsive">
+          <table class="complaint-table">
+            <thead>
+              <tr>
+                <th>Tracking ID</th>
+                <th>Category</th>
+                <th>Issue Type</th>
+                <th>Severity</th>
+                <th>Reports</th>
+                <th>Status</th>
+                <th>Assigned Dept</th>
+                <th>Submitted</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for c in complaints %}
+              <tr class="table-row-link" onclick="window.location='/admin/complaint/{{ c.id }}'">
+                <td>
+                  <a href="/admin/complaint/{{ c.id }}" class="table-tracking-link">
+                    {{ c.tracking_id }}
+                  </a>
+                  {% if c.children and c.children|length > 0 %}
+                    <span class="has-children-badge" title="{{ c.children|length }} duplicate citizen reports linked">+{{ c.children|length }} linked</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <span class="cat-pill cat-{{ c.category }}">
+                    {% if c.category == 'road' %}🛣️ Road
+                    {% elif c.category == 'pollution' %}🏭 Pollution
+                    {% else %}🚰 Water{% endif %}
+                  </span>
+                </td>
+                <td class="cell-issue">
+                  <strong>{{ c.issue_type }}</strong>
+                </td>
+                <td>
+                  {% if c.severity %}
+                    {% if c.severity <= 2 %}
+                      <span class="severity-badge sev-green" style="font-size: 10.5px; padding: 2px 7px;">{{ c.severity }}/5 &bull; Minor</span>
+                    {% elif c.severity == 3 %}
+                      <span class="severity-badge sev-amber" style="font-size: 10.5px; padding: 2px 7px;">3/5 &bull; Moderate</span>
+                    {% else %}
+                      <span class="severity-badge sev-red" style="font-size: 10.5px; padding: 2px 7px;">{{ c.severity }}/5 &bull; Critical</span>
+                    {% endif %}
+                  {% else %}
+                    <span class="severity-badge" style="background: rgba(255,255,255,0.08); color: #94a3b8; font-size: 10.5px;">Unrated</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <span class="report-count-badge {% if c.report_count >= 3 %}crowd-high{% endif %}">
+                    👥 {{ c.report_count }}
+                  </span>
+                </td>
+                <td>
+                  {% if c.status == 'Resolved' %}
+                    <span class="status-pill status-resolved" style="font-size: 11px; padding: 3px 8px;">Resolved</span>
+                  {% elif c.status == 'In Progress' %}
+                    <span class="status-pill status-progress" style="font-size: 11px; padding: 3px 8px;">In Progress</span>
+                  {% elif c.status == 'Under Review' or c.status == 'Assigned' %}
+                    <span class="status-pill status-review" style="font-size: 11px; padding: 3px 8px;">{{ c.status }}</span>
+                  {% else %}
+                    <span class="status-pill status-submitted" style="font-size: 11px; padding: 3px 8px;">Submitted</span>
+                  {% endif %}
+                </td>
+                <td class="cell-dept">
+                  {{ c.department.name.replace('Tumakuru City Corporation - ', '') if c.department else 'Engineering Wing' }}
+                </td>
+                <td class="cell-date">
+                  {{ c.created_at.strftime('%d %b, %I:%M %p') if c.created_at else '' }}
+                </td>
+                <td>
+                  <a href="/admin/complaint/{{ c.id }}" class="btn-table-action" onclick="event.stopPropagation();">
+                    <span>Review</span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M5 12h14M12 5l7 7-7 7"/>
+                    </svg>
+                  </a>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+      </div>
+    </main>
+
+    <footer class="admin-footer">
+      <p>Tumakuru City Corporation &bull; CivicEye Municipal Management Portal &bull; Confidential</p>
+    </footer>
+  </div>
+</body>
+</html>

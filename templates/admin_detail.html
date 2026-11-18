@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0f172a">
+  <title>Manage {{ complaint.tracking_id }} - CivicEye Admin</title>
+
+  <!-- Leaflet OpenStreetMap CDN -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="admin-body">
+  <div class="admin-shell">
+    <!-- Top Admin Navigation Bar -->
+    <header class="admin-navbar">
+      <div class="admin-nav-left">
+        <a href="/admin" class="btn-nav-back">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 12H5M12 19l-7-7 7-7"/>
+          </svg>
+          <span>Dashboard</span>
+        </a>
+        <div class="admin-brand">
+          <span class="admin-title">Grievance Review</span>
+          <span class="admin-badge">{{ complaint.tracking_id }}</span>
+        </div>
+      </div>
+
+      <div class="admin-nav-right">
+        <a href="/track/{{ complaint.tracking_id }}" target="_blank" class="btn-nav-link" title="Open public tracking view">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+            <polyline points="15 3 21 3 21 9"/>
+            <line x1="10" y1="14" x2="21" y2="3"/>
+          </svg>
+          <span>Citizen View</span>
+        </a>
+        <a href="/admin/logout" class="btn-logout">Logout</a>
+      </div>
+    </header>
+
+    <main class="admin-content">
+      <!-- Flash Messages -->
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="alert-banner alert-{{ category }}">
+              <span>{{ message }}</span>
+            </div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      <!-- Grievance Header Banner -->
+      <div class="admin-header-card">
+        <div class="header-main-row">
+          <div>
+            <span class="track-meta-label">MANAGING GRIEVANCE</span>
+            <h1 class="admin-tracking-heading">{{ complaint.tracking_id }}</h1>
+            <div class="admin-tags-row">
+              <span class="cat-pill cat-{{ complaint.category }}">
+                {% if complaint.category == 'road' %}🛣️ Road Damage
+                {% elif complaint.category == 'pollution' %}🏭 Pollution
+                {% else %}🚰 Water Supply{% endif %}
+              </span>
+              <span class="issue-pill">{{ complaint.issue_type }}</span>
+              <span class="crowd-pill">👥 {{ complaint.report_count }} Citizen Reports</span>
+            </div>
+          </div>
+
+          <div class="header-status-box">
+            <span class="status-meta-label">CURRENT STATUS</span>
+            {% if complaint.status == 'Resolved' %}
+              <span class="status-pill status-resolved">{{ complaint.status }}</span>
+            {% elif complaint.status == 'In Progress' %}
+              <span class="status-pill status-progress">{{ complaint.status }}</span>
+            {% elif complaint.status == 'Under Review' or complaint.status == 'Assigned' %}
+              <span class="status-pill status-review">{{ complaint.status }}</span>
+            {% else %}
+              <span class="status-pill status-submitted">{{ complaint.status }}</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- Detail Grid: Left (Evidence & Info) vs Right (Admin Action Console) -->
+      <div class="admin-detail-layout">
+        <!-- LEFT COLUMN: Evidence, AI, Map, Timeline -->
+        <div class="admin-col-info">
+          
+          <!-- 1. Photos & Voice Evidence -->
+          <div class="track-section-card">
+            <div class="section-card-header">
+              <div class="header-icon-title">
+                <span class="section-emoji">📸</span>
+                <h2 class="section-title">Submitted Photo &amp; Evidence</h2>
+              </div>
+            </div>
+
+            <div class="evidence-photos-grid">
+              <!-- Before Photo -->
+              <div class="photo-item-box">
+                <span class="photo-type-label">Before (Citizen Photo)</span>
+                {% if complaint.photo_path %}
+                  <img src="{{ url_for('static', filename=complaint.photo_path) }}" alt="Citizen uploaded grievance photo" class="evidence-img">
+                {% else %}
+                  <div class="no-photo-box">No photo uploaded</div>
+                {% endif %}
+              </div>
+
+              <!-- After Photo (if uploaded) -->
+              <div class="photo-item-box">
+                <span class="photo-type-label">After (Resolution Photo)</span>
+                {% if complaint.after_photo_path %}
+                  <img src="{{ url_for('static', filename=complaint.after_photo_path) }}" alt="Municipal resolution photo" class="evidence-img">
+                  <span class="photo-uploaded-tag">✓ Verified Resolution Photo</span>
+                {% else %}
+                  <div class="no-photo-box after-placeholder">
+                    <span>No resolution photo uploaded yet.</span>
+                    <span class="sub-hint">Use the action panel to attach an after photo upon resolution.</span>
+                  </div>
+                {% endif %}
+              </div>
+            </div>
+
+            <!-- Voice Player and Transcript -->
+            {% if complaint.audio_path %}
+            <div class="audio-evidence-block" style="margin-top: 16px;">
+              <span class="photo-type-label" style="display: block; margin-bottom: 6px;">🎙️ Citizen Voice Recording</span>
+              <audio controls src="{{ url_for('static', filename=complaint.audio_path) }}" class="summary-audio-player"></audio>
+            </div>
+            {% endif %}
+
+            {% if complaint.transcription %}
+            <div class="voice-transcript-block" style="margin-top: 12px;">
+              <div class="voice-transcript-card">
+                <div class="transcript-header-row">
+                  <span class="transcript-mic-tag">🎙️ Spoken Grievance</span>
+                  <span class="transcript-lang-tag">Transcribed &amp; Translated by Gemini</span>
+                </div>
+                <p class="transcript-text">"{{ complaint.transcription }}"</p>
+              </div>
+            </div>
+            {% endif %}
+
+            <!-- Description -->
+            <div style="margin-top: 14px;">
+              <span class="photo-type-label" style="display: block; margin-bottom: 6px;">Citizen Written Description</span>
+              <p class="track-desc-text">{{ complaint.description }}</p>
+            </div>
+          </div>
+
+          <!-- 2. AI Triage Assessment -->
+          <div class="ai-analysis-card">
+            <div class="ai-card-header">
+              <div class="ai-brand-badge">
+                <span class="ai-spark-icon">✨</span>
+                <span class="ai-card-title">AI Triage Assessment</span>
+              </div>
+              {% if complaint.severity %}
+                {% if complaint.severity <= 2 %}
+                  <span class="severity-badge sev-green">Severity {{ complaint.severity }}/5 &bull; Minor</span>
+                {% elif complaint.severity == 3 %}
+                  <span class="severity-badge sev-amber">Severity 3/5 &bull; Moderate</span>
+                {% else %}
+                  <span class="severity-badge sev-red">Severity {{ complaint.severity }}/5 &bull; Critical</span>
+                {% endif %}
+              {% endif %}
+            </div>
+
+            {% if complaint.image_matches_report is not none and not complaint.image_matches_report %}
+            <div class="ai-warning-box">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="warning-icon">
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+              <div class="warning-text">
+                <strong>Photo Verification Notice:</strong> The uploaded image may not clearly match the reported issue.
+              </div>
+            </div>
+            {% endif %}
+
+            <div class="ai-field-block">
+              <span class="ai-field-label">DETECTED ISSUE:</span>
+              <p class="ai-field-val">{{ complaint.detected_issue or complaint.issue_type }}</p>
+            </div>
+
+            <div class="ai-field-block">
+              <span class="ai-field-label">AI SUMMARY:</span>
+              <div class="analysis-summary">
+                <p>{{ complaint.ai_summary or 'No AI summary generated.' }}</p>
+              </div>
+            </div>
+
+            {% if complaint.reasons_list and complaint.reasons_list|length > 0 %}
+            <div class="ai-field-block">
+              <span class="ai-field-label">ASSESSMENT FACTORS:</span>
+              <ul class="analysis-reasons">
+                {% for reason in complaint.reasons_list %}
+                  <li>{{ reason }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+            {% endif %}
+
+            {% if complaint.suggested_action %}
+            <div class="analysis-action">
+              <span class="action-tag">SUGGESTED ACTION:</span>
+              <p>{{ complaint.suggested_action }}</p>
+            </div>
+            {% endif %}
+
+            <div class="ai-card-footer">
+              <span class="ai-disclaimer">Source: {{ complaint.ai_source or 'gemini' }} &bull; Confidence: {{ (complaint.ai_confidence * 100)|int if complaint.ai_confidence else 'N/A' }}%</span>
+              <div class="ai-simulated-note">Simulated department workflow</div>
+            </div>
+          </div>
+
+          <!-- 3. Linked Duplicate Complaints (if any) -->
+          {% if complaint.children and complaint.children|length > 0 %}
+          <div class="track-section-card">
+            <div class="section-card-header">
+              <div class="header-icon-title">
+                <span class="section-emoji">🔗</span>
+                <h2 class="section-title">Linked Duplicate Citizen Reports ({{ complaint.children|length }})</h2>
+              </div>
+            </div>
+            <p class="section-hint-text">
+              These {{ complaint.children|length }} grievances were submitted nearby within 50m. Status updates applied on this parent will automatically sync to all linked duplicate children.
+            </p>
+            <div class="children-list">
+              {% for child in complaint.children %}
+              <div class="child-report-row">
+                <div class="child-info">
+                  <a href="/track/{{ child.tracking_id }}" target="_blank" class="child-track-link">{{ child.tracking_id }}</a>
+                  <span class="child-date">{{ child.created_at.strftime('%d %b %Y, %I:%M %p') if child.created_at else '' }}</span>
+                  <span class="child-desc">{{ child.description }}</span>
+                </div>
+                {% if child.photo_path %}
+                <img src="{{ url_for('static', filename=child.photo_path) }}" alt="Child report photo" class="child-thumb">
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+
+          <!-- 4. Location Map -->
+          <div class="track-section-card">
+            <div class="section-card-header">
+              <div class="header-icon-title">
+                <span class="section-emoji">📍</span>
+                <h2 class="section-title">Incident Location Pin</h2>
+              </div>
+            </div>
+            <div id="admin-map" class="track-map-container" style="height: 240px;"></div>
+            <div class="track-location-meta">
+              <div class="location-meta-row">
+                <span class="location-address-text">{{ complaint.address_text or 'Tumakuru, Karnataka' }}</span>
+              </div>
+              {% if complaint.latitude and complaint.longitude %}
+              <div class="location-coords-text">
+                Coordinates: {{ complaint.latitude }}, {{ complaint.longitude }}
+              </div>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- 5. Vertical Timeline -->
+          <div class="track-section-card">
+            <div class="section-card-header">
+              <div class="header-icon-title">
+                <span class="section-emoji">📋</span>
+                <h2 class="section-title">Status History &amp; Audit Log</h2>
+              </div>
+              <span class="timeline-step-count">{{ history_timeline|length }} entries</span>
+            </div>
+
+            <div class="vertical-timeline">
+              {% for h in history_timeline %}
+              <div class="timeline-item {% if loop.last %}latest-step{% endif %}">
+                <div class="timeline-line"></div>
+                <div class="timeline-marker">
+                  {% if loop.last %}
+                    <span class="marker-pulse"></span>
+                  {% else %}
+                    <span class="marker-dot"></span>
+                  {% endif %}
+                </div>
+                <div class="timeline-body">
+                  <div class="timeline-meta-row">
+                    <span class="timeline-status-badge status-{{ h.status|lower|replace(' ', '-') }}">
+                      {{ h.status }}
+                    </span>
+                    <span class="timeline-date">
+                      {{ h.changed_at.strftime('%d %b %Y, %I:%M %p') if h.changed_at else '' }}
+                    </span>
+                  </div>
+                  <p class="timeline-note">{{ h.note }}</p>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT COLUMN: Municipal Action Console -->
+        <div class="admin-col-action">
+          <div class="admin-action-card sticky-action-box">
+            <div class="action-card-header">
+              <div class="header-icon-title">
+                <span class="section-emoji">⚙️</span>
+                <h2 class="section-title">Municipal Action Console</h2>
+              </div>
+            </div>
+
+            <form action="/admin/complaint/{{ complaint.id }}" method="POST" enctype="multipart/form-data" class="admin-manage-form">
+              <!-- (c) Update Status -->
+              <div class="admin-form-group">
+                <label for="status" class="admin-field-label">Update Workflow Status</label>
+                <div class="select-wrapper">
+                  <select name="status" id="status" class="form-select">
+                    <option value="Submitted" {% if complaint.status == 'Submitted' %}selected{% endif %}>Submitted</option>
+                    <option value="Under Review" {% if complaint.status == 'Under Review' %}selected{% endif %}>Under Review</option>
+                    <option value="Assigned" {% if complaint.status == 'Assigned' %}selected{% endif %}>Assigned</option>
+                    <option value="In Progress" {% if complaint.status == 'In Progress' %}selected{% endif %}>In Progress</option>
+                    <option value="Resolved" {% if complaint.status == 'Resolved' %}selected{% endif %}>Resolved</option>
+                  </select>
+                  <span class="select-arrow">▼</span>
+                </div>
+                <input 
+                  type="text" 
+                  name="status_note" 
+                  class="admin-text-input" 
+                  placeholder="Optional status transition note for citizen..."
+                  style="margin-top: 8px;"
+                >
+                <span class="admin-field-hint">
+                  Status changes will automatically apply to all {{ complaint.children|length }} duplicate citizen reports linked to this complaint.
+                </span>
+              </div>
+
+              <!-- (a) Override Severity (1-5) with Required Reason -->
+              <div class="admin-form-group">
+                <label for="severity" class="admin-field-label">Override Severity Rating (1-5)</label>
+                <div class="select-wrapper">
+                  <select name="severity" id="severity" class="form-select">
+                    <option value="1" {% if complaint.severity == 1 %}selected{% endif %}>1 - Negligible / Minor</option>
+                    <option value="2" {% if complaint.severity == 2 %}selected{% endif %}>2 - Low</option>
+                    <option value="3" {% if complaint.severity == 3 %}selected{% endif %}>3 - Moderate</option>
+                    <option value="4" {% if complaint.severity == 4 %}selected{% endif %}>4 - High</option>
+                    <option value="5" {% if complaint.severity == 5 %}selected{% endif %}>5 - Critical / Emergency</option>
+                  </select>
+                  <span class="select-arrow">▼</span>
+                </div>
+                <input 
+                  type="text" 
+                  name="severity_reason" 
+                  id="severity_reason" 
+                  class="admin-text-input" 
+                  placeholder="Required reason if changing severity rating..."
+                  style="margin-top: 8px;"
+                >
+                <span class="admin-field-hint">
+                  Logged in audit history as: "Severity changed from X to Y by admin: reason"
+                </span>
+              </div>
+
+              <!-- (b) Reassign Department (filtered by category) -->
+              <div class="admin-form-group">
+                <label for="department_id" class="admin-field-label">Reassign Department ({{ complaint.category|capitalize }})</label>
+                <div class="select-wrapper">
+                  <select name="department_id" id="department_id" class="form-select">
+                    {% for d in departments %}
+                      <option value="{{ d.id }}" {% if complaint.department_id == d.id %}selected{% endif %}>
+                        {{ d.name }}
+                      </option>
+                    {% endfor %}
+                  </select>
+                  <span class="select-arrow">▼</span>
+                </div>
+                <span class="admin-field-hint">Filtered to municipal departments handling {{ complaint.category }}.</span>
+              </div>
+
+              <!-- (d) Upload 'After' Resolution Photo -->
+              <div class="admin-form-group">
+                <label for="after_photo" class="admin-field-label">Upload Resolution ('After') Photo</label>
+                <div class="admin-file-upload-box">
+                  <input type="file" name="after_photo" id="after_photo" accept="image/*" class="admin-file-input">
+                  <label for="after_photo" class="admin-file-label">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="17 8 12 3 7 8"/>
+                      <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    <span id="after-photo-filename">Choose photo file (JPEG, PNG)...</span>
+                  </label>
+                </div>
+                {% if complaint.after_photo_path %}
+                  <span class="admin-field-success">✓ Existing after photo is saved. Uploading replaces it.</span>
+                {% else %}
+                  <span class="admin-field-hint">Stored as after_photo_path upon completion of site repair.</span>
+                {% endif %}
+              </div>
+
+              <!-- Save Changes Button -->
+              <button type="submit" class="btn-submit-report" style="margin-top: 10px;">
+                <span>Save Updates &amp; Record Audit Log</span>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // Leaflet Location Pin Map
+    document.addEventListener('DOMContentLoaded', function() {
+      const mapElem = document.getElementById('admin-map');
+      if (!mapElem) return;
+
+      const lat = {{ complaint.latitude or 13.3392 }};
+      const lng = {{ complaint.longitude or 77.1140 }};
+
+      const map = L.map('admin-map', {
+        center: [lat, lng],
+        zoom: 15,
+        zoomControl: true,
+        scrollWheelZoom: false
+      });
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap'
+      }).addTo(map);
+
+      const marker = L.marker([lat, lng]).addTo(map);
+      marker.bindPopup("<strong>{{ complaint.tracking_id }}</strong><br>{{ complaint.detected_issue or complaint.issue_type }}<br>{{ complaint.address_text }}").openPopup();
+
+      setTimeout(() => { map.invalidateSize(); }, 250);
+    });
+
+    // File name update for after photo upload
+    const afterPhotoInput = document.getElementById('after_photo');
+    const afterPhotoName = document.getElementById('after-photo-filename');
+    if (afterPhotoInput && afterPhotoName) {
+      afterPhotoInput.addEventListener('change', function() {
+        if (this.files && this.files.length > 0) {
+          afterPhotoName.textContent = this.files[0].name;
+          afterPhotoName.style.color = '#38bdf8';
+        }
+      });
+    }
+
+    // Client-side validation: require reason if severity is changed
+    const adminForm = document.querySelector('.admin-manage-form');
+    const sevSelect = document.getElementById('severity');
+    const sevReason = document.getElementById('severity_reason');
+    const originalSev = "{{ complaint.severity }}";
+
+    if (adminForm && sevSelect && sevReason) {
+      adminForm.addEventListener('submit', function(e) {
+        if (sevSelect.value !== originalSev && !sevReason.value.trim()) {
+          e.preventDefault();
+          alert("A reason is required when overriding the severity rating.");
+          sevReason.focus();
+        }
+      });
+    }
+  </script>
+</body>
+</html>

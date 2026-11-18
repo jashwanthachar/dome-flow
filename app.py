@@ -9,7 +9,8 @@ import uuid
 import math
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, redirect, url_for, jsonify
+from functools import wraps
+from flask import Flask, render_template, request, redirect, url_for, jsonify, session, flash
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
 from ai_triage import analyze_complaint, optimize_image_for_ai
@@ -18,7 +19,8 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 load_dotenv(os.path.join(basedir, ".env"))
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "civiceye-tumakuru-dev-secret")
+# Load SECRET_KEY from environment variable (never hardcode)
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY") or os.environ.get("FLASK_SECRET_KEY") or os.urandom(24).hex()
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
     "DATABASE_URL", f"sqlite:///{os.path.join(basedir, 'civiceye.db')}"
 )
@@ -130,6 +132,7 @@ class Complaint(db.Model):
     detected_issue = db.Column(db.String(150), nullable=True)
     suggested_action = db.Column(db.String(255), nullable=True)
     transcription = db.Column(db.Text, nullable=True)
+    after_photo_path = db.Column(db.String(255), nullable=True)
     department_id = db.Column(db.Integer, db.ForeignKey("department.id"), nullable=True)
     created_at = db.Column(
         db.DateTime,
@@ -190,6 +193,7 @@ class Complaint(db.Model):
             "detected_issue": self.detected_issue,
             "suggested_action": self.suggested_action,
             "transcription": self.transcription,
+            "after_photo_path": self.after_photo_path,
             "department_id": self.department_id,
             "created_at": self.created_at.isoformat(),
         }
@@ -278,6 +282,7 @@ def init_db():
             "parent_id",
             "report_count",
             "transcription",
+            "after_photo_path",
         }
         if not required_cols.issubset(set(columns)):
             print("Detected missing columns in complaint table; dropping and recreating database...")
@@ -625,6 +630,279 @@ def track(tracking_id=None):
         complaint=complaint,
         tracking_id=query_id,
         searched=searched,
+        history_timeline=history_timeline,
+    )
+
+
+# -------------------------------------------------------------
+# Admin Authentication Helper
+# -------------------------------------------------------------
+def admin_required(f):
+    """Decorator to enforce admin authentication via session."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get("is_admin"):
+            return redirect(url_for("admin_login", next=request.url))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+# -------------------------------------------------------------
+# Admin Routes
+# -------------------------------------------------------------
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    """Admin portal login using ADMIN_PASSWORD env var and Flask session."""
+    if session.get("is_admin"):
+        return redirect(url_for("admin_dashboard"))
+
+    error = None
+    if request.method == "POST":
+        entered_password = request.form.get("password", "").strip()
+        admin_password = os.environ.get("ADMIN_PASSWORD", "").strip()
+
+        if not admin_password:
+            error = "ADMIN_PASSWORD is not configured in the server environment."
+        elif entered_password == admin_password:
+            session["is_admin"] = True
+            next_url = request.args.get("next")
+            if not next_url or not next_url.startswith("/"):
+                next_url = url_for("admin_dashboard")
+            return redirect(next_url)
+        else:
+            error = "Invalid administrator password. Please try again."
+
+    return render_template("admin_login.html", error=error)
+
+
+@app.route("/admin/logout", methods=["GET", "POST"])
+def admin_logout():
+    """Log out of the admin portal."""
+    session.pop("is_admin", None)
+    return redirect(url_for("admin_login"))
+
+
+@app.route("/admin")
+@app.route("/admin/dashboard")
+@admin_required
+def admin_dashboard():
+    """
+    Admin dashboard: table of parent complaints only, sortable and filterable.
+    Default sorted by severity then report_count.
+    """
+    # Base query: parent complaints only
+    query = Complaint.query.filter(Complaint.parent_id.is_(None))
+
+    # Filters
+    category_filter = request.args.get("category", "all").strip().lower()
+    if category_filter and category_filter != "all":
+        query = query.filter(Complaint.category == category_filter)
+
+    status_filter = request.args.get("status", "all").strip()
+    if status_filter and status_filter != "all":
+        query = query.filter(Complaint.status == status_filter)
+
+    severity_filter = request.args.get("severity", "all").strip()
+    if severity_filter and severity_filter != "all":
+        try:
+            query = query.filter(Complaint.severity == int(severity_filter))
+        except ValueError:
+            pass
+
+    # Sorting: default sorted by severity then report_count
+    sort_by = request.args.get("sort", "default").strip()
+    order = request.args.get("order", "desc").strip().lower()
+
+    if sort_by == "date":
+        query = query.order_by(Complaint.created_at.asc() if order == "asc" else Complaint.created_at.desc())
+    elif sort_by == "reports":
+        query = query.order_by(
+            Complaint.report_count.asc() if order == "asc" else Complaint.report_count.desc(),
+            Complaint.severity.desc()
+        )
+    elif sort_by == "status":
+        query = query.order_by(Complaint.status.asc() if order == "asc" else Complaint.status.desc())
+    elif sort_by == "severity":
+        query = query.order_by(
+            Complaint.severity.asc() if order == "asc" else Complaint.severity.desc(),
+            Complaint.report_count.desc()
+        )
+    else:
+        # Default: sorted by severity then report_count
+        query = query.order_by(
+            Complaint.severity.desc(),
+            Complaint.report_count.desc(),
+            Complaint.created_at.desc()
+        )
+
+    complaints = query.all()
+
+    # KPI counts for parent complaints
+    total_parent_count = Complaint.query.filter(Complaint.parent_id.is_(None)).count()
+    active_count = Complaint.query.filter(Complaint.parent_id.is_(None), Complaint.status != "Resolved").count()
+    high_sev_count = Complaint.query.filter(Complaint.parent_id.is_(None), Complaint.severity >= 4).count()
+    resolved_count = Complaint.query.filter(Complaint.parent_id.is_(None), Complaint.status == "Resolved").count()
+
+    return render_template(
+        "admin_dashboard.html",
+        complaints=complaints,
+        category_filter=category_filter,
+        status_filter=status_filter,
+        severity_filter=severity_filter,
+        sort_by=sort_by,
+        order=order,
+        total_parent_count=total_parent_count,
+        active_count=active_count,
+        high_sev_count=high_sev_count,
+        resolved_count=resolved_count,
+    )
+
+
+@app.route("/admin/complaint/<int:complaint_id>", methods=["GET", "POST"])
+@admin_required
+def admin_complaint_detail(complaint_id):
+    """
+    Admin complaint detail view with actions:
+    (a) Override severity (1-5) with required reason -> saved to StatusHistory
+    (b) Reassign department from category-filtered dropdown -> saved to StatusHistory
+    (c) Update status with note -> saved to StatusHistory, applies to duplicate children too
+    (d) Optionally upload after photo -> saved as after_photo_path, saved to StatusHistory
+    """
+    complaint = Complaint.query.get_or_404(complaint_id)
+
+    # Filter departments by this complaint's category
+    category_departments = Department.query.filter_by(category=complaint.category).all()
+    if not category_departments:
+        category_departments = Department.query.all()
+
+    if request.method == "POST":
+        changes_count = 0
+
+        # (a) Override Severity (1-5) with required reason
+        new_sev_str = request.form.get("severity", "").strip()
+        sev_reason = request.form.get("severity_reason", "").strip()
+        if new_sev_str:
+            try:
+                new_sev = int(new_sev_str)
+                if 1 <= new_sev <= 5 and new_sev != complaint.severity:
+                    if not sev_reason:
+                        flash("A reason is required when overriding the severity rating.", "error")
+                        return redirect(url_for("admin_complaint_detail", complaint_id=complaint.id))
+
+                    old_sev = complaint.severity or "Unrated"
+                    complaint.severity = new_sev
+
+                    # Required StatusHistory format:
+                    # "Severity changed from X to Y by admin: reason"
+                    hist_note = f"Severity changed from {old_sev} to {new_sev} by admin: {sev_reason}"
+                    h_sev = StatusHistory(
+                        complaint_id=complaint.id,
+                        status=complaint.status,
+                        note=hist_note
+                    )
+                    db.session.add(h_sev)
+
+                    # Update severity_reasons list
+                    reasons = list(complaint.reasons_list)
+                    reasons.append(f"Admin override: {sev_reason}")
+                    complaint.severity_reasons = json.dumps(reasons)
+                    changes_count += 1
+            except ValueError:
+                pass
+
+        # (b) Reassign Department from dropdown filtered by category
+        new_dept_id_str = request.form.get("department_id", "").strip()
+        if new_dept_id_str:
+            try:
+                new_dept_id = int(new_dept_id_str)
+                if new_dept_id != complaint.department_id:
+                    new_dept = Department.query.get(new_dept_id)
+                    if new_dept:
+                        old_dept_name = complaint.department.name if complaint.department else "Unassigned"
+                        complaint.department_id = new_dept.id
+                        h_dept = StatusHistory(
+                            complaint_id=complaint.id,
+                            status=complaint.status,
+                            note=f"Department reassigned from {old_dept_name} to {new_dept.name} by admin"
+                        )
+                        db.session.add(h_dept)
+                        changes_count += 1
+            except ValueError:
+                pass
+
+        # (c) Update status through Submitted > Under Review > Assigned > In Progress > Resolved with note
+        new_status = request.form.get("status", "").strip()
+        status_note = request.form.get("status_note", "").strip()
+        valid_statuses = ["Submitted", "Under Review", "Assigned", "In Progress", "Resolved"]
+
+        if new_status and new_status in valid_statuses:
+            if new_status != complaint.status or status_note:
+                complaint.status = new_status
+                effective_note = status_note if status_note else f"Status updated to {new_status} by admin"
+
+                h_status = StatusHistory(
+                    complaint_id=complaint.id,
+                    status=new_status,
+                    note=effective_note
+                )
+                db.session.add(h_status)
+
+                # When a parent complaint's status changes, apply it to all duplicate children too
+                if complaint.children:
+                    for child in complaint.children:
+                        child.status = new_status
+                        child_note = (
+                            f"Status updated to {new_status} (synced from parent {complaint.tracking_id}): {status_note}"
+                            if status_note
+                            else f"Status updated to {new_status} (synced from parent {complaint.tracking_id})"
+                        )
+                        h_child = StatusHistory(
+                            complaint_id=child.id,
+                            status=new_status,
+                            note=child_note
+                        )
+                        db.session.add(h_child)
+
+                changes_count += 1
+
+        # (d) Optionally upload an "after" photo (store as after_photo_path)
+        after_file = request.files.get("after_photo")
+        if after_file and after_file.filename:
+            ext = os.path.splitext(secure_filename(after_file.filename))[1].lower()
+            if ext not in [".jpg", ".jpeg", ".png", ".webp"]:
+                ext = ".jpg"
+            after_filename = f"after_{uuid.uuid4().hex[:14]}{ext}"
+            after_save_path = os.path.join(app.config["UPLOAD_FOLDER"], after_filename)
+            after_file.save(after_save_path)
+            complaint.after_photo_path = f"uploads/{after_filename}"
+
+            h_photo = StatusHistory(
+                complaint_id=complaint.id,
+                status=complaint.status,
+                note="Resolution 'after' photo uploaded by municipal admin"
+            )
+            db.session.add(h_photo)
+            changes_count += 1
+
+        if changes_count > 0:
+            db.session.commit()
+            flash("Grievance updated successfully.", "success")
+        else:
+            flash("No changes were submitted.", "info")
+
+        return redirect(url_for("admin_complaint_detail", complaint_id=complaint.id))
+
+    # GET request: fetch chronological timeline
+    history_timeline = (
+        StatusHistory.query.filter_by(complaint_id=complaint.id)
+        .order_by(StatusHistory.changed_at.asc(), StatusHistory.id.asc())
+        .all()
+    )
+
+    return render_template(
+        "admin_detail.html",
+        complaint=complaint,
+        departments=category_departments,
         history_timeline=history_timeline,
     )
 
