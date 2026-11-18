@@ -595,16 +595,37 @@ def success(tracking_id):
     return render_template("success.html", complaint=complaint)
 
 
-@app.route("/track")
-def track():
-    """Placeholder page for tracking grievance complaints."""
-    req_id = request.args.get("id", "").strip()
+@app.route("/track", methods=["GET"])
+@app.route("/track/<tracking_id>", methods=["GET"])
+def track(tracking_id=None):
+    """
+    Search and track complaint status with vertical timeline, map, and AI triage.
+    Reachable via /track, /track?id=... and /track/<tracking_id>.
+    """
+    query_id = (tracking_id or request.args.get("id", "")).strip()
+    complaint = None
+    searched = bool(query_id)
+
+    if query_id:
+        complaint = Complaint.query.filter(
+            db.func.upper(Complaint.tracking_id) == query_id.upper()
+        ).first()
+
+    history_timeline = []
+    if complaint:
+        # Chronological order for the vertical progression timeline
+        history_timeline = (
+            StatusHistory.query.filter_by(complaint_id=complaint.id)
+            .order_by(StatusHistory.changed_at.asc(), StatusHistory.id.asc())
+            .all()
+        )
+
     return render_template(
-        "placeholder.html",
-        title="Track Complaint",
-        heading="Track Your Grievance",
-        icon="🔍",
-        message=f"Tracking ID: {req_id}. Enter your CivicEye tracking ID to view live status updates and department action notes." if req_id else "Enter your CivicEye tracking ID (e.g., CE-2026-0001) to view live status updates and department action notes."
+        "track.html",
+        complaint=complaint,
+        tracking_id=query_id,
+        searched=searched,
+        history_timeline=history_timeline,
     )
 
 

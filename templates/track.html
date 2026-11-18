@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0f172a">
+  <title>{% if complaint %}Track {{ complaint.tracking_id }} - CivicEye{% else %}Track Grievance - CivicEye Tumakuru{% endif %}</title>
+  
+  <!-- Leaflet OpenStreetMap CDN -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="mobile-container">
+    <!-- Header -->
+    <header class="app-header" style="padding-bottom: 16px;">
+      <a href="/" class="placeholder-back-btn">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M19 12H5M12 19l-7-7 7-7"/>
+        </svg>
+        <span>Back to Home</span>
+      </a>
+
+      <div class="brand-row" style="margin-top: 10px;">
+        <div class="logo-mark">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1 class="brand-name">CivicEye</h1>
+          <span class="city-tag">Tumakuru</span>
+        </div>
+      </div>
+      <p class="hero-tagline" style="margin-top: 4px;">Track Grievance Status</p>
+      <p class="hero-subtext">Live audit log, municipal assignment &amp; resolution progress</p>
+    </header>
+
+    <main class="track-main-wrap">
+      <!-- Search Box Card -->
+      <div class="track-search-card">
+        <form action="/track" method="GET" class="track-search-form" id="track-search-form">
+          <div class="track-search-input-wrap">
+            <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"/>
+              <path d="m21 21-4.3-4.3"/>
+            </svg>
+            <input 
+              type="text" 
+              name="id" 
+              id="tracking-input" 
+              class="track-search-input" 
+              placeholder="Enter Tracking ID (e.g. CE-2026-0004)"
+              value="{{ tracking_id or '' }}" 
+              required
+              autocomplete="off"
+              autocapitalize="characters"
+            >
+            {% if tracking_id %}
+            <a href="/track" class="btn-clear-search" title="Clear search">&times;</a>
+            {% endif %}
+          </div>
+          <button type="submit" class="btn-track-submit">
+            <span>Track</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 12h14M12 5l7 7-7 7"/>
+            </svg>
+          </button>
+        </form>
+        <div class="search-helper-row">
+          <span class="search-helper-label">Quick search:</span>
+          <button type="button" class="btn-sample-id" onclick="setTrackingId('CE-2026-0004')">CE-2026-0004</button>
+          <button type="button" class="btn-sample-id" onclick="setTrackingId('CE-2026-0001')">CE-2026-0001</button>
+        </div>
+      </div>
+
+      {% if searched and not complaint %}
+      <!-- Friendly Not Found Message -->
+      <div class="track-not-found-card">
+        <div class="not-found-icon-wrap">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            <line x1="8" y1="11" x2="14" y2="11"/>
+          </svg>
+        </div>
+        <h2 class="not-found-title">No Grievance Found</h2>
+        <p class="not-found-desc">
+          We could not find any grievance matching tracking ID <strong class="not-found-id">{{ tracking_id }}</strong>.
+        </p>
+        <div class="not-found-tips">
+          <p class="tips-heading">Please verify:</p>
+          <ul>
+            <li>Tracking IDs follow the pattern <code>CE-YYYY-NNNN</code> (e.g., <code>CE-2026-0004</code>).</li>
+            <li>Codes are case-insensitive.</li>
+            <li>If you just submitted an issue, copy the exact tracking ID from your confirmation screen.</li>
+          </ul>
+        </div>
+        <a href="/track" class="btn-retry-search">Try Another Tracking ID</a>
+      </div>
+
+      {% elif not searched %}
+      <!-- Initial State Instructions -->
+      <div class="track-welcome-card">
+        <div class="welcome-icon">🔍</div>
+        <h2 class="welcome-title">Enter a Tracking ID</h2>
+        <p class="welcome-desc">
+          Keep track of your civic grievance from first report to ground resolution. Enter your CivicEye tracking code above to view live municipal workflow notes, assigned field department, and AI inspection findings.
+        </p>
+        <div class="welcome-categories">
+          <div class="welcome-cat-pill">🛣️ Road Repairs</div>
+          <div class="welcome-cat-pill">🏭 Sanitation</div>
+          <div class="welcome-cat-pill">🚰 Water Supply</div>
+        </div>
+      </div>
+
+      {% elif complaint %}
+      <!-- COMPLAINT FOUND: Full Tracking Details -->
+      
+      <!-- 1. Header Tracking Code & Status Card -->
+      <div class="track-status-header-card">
+        <div class="track-code-row">
+          <div class="track-code-meta">
+            <span class="track-meta-label">TRACKING ID</span>
+            <div class="track-id-large" id="track-id-display">{{ complaint.tracking_id }}</div>
+          </div>
+          
+          <!-- Status Badge -->
+          <div class="status-badge-wrap">
+            {% if complaint.status == 'Resolved' %}
+              <span class="status-pill status-resolved">
+                <span class="status-dot"></span> Resolved
+              </span>
+            {% elif complaint.status == 'In Progress' %}
+              <span class="status-pill status-progress">
+                <span class="status-dot pulsing"></span> In Progress
+              </span>
+            {% elif complaint.status == 'Under Review' or complaint.status == 'Assigned' %}
+              <span class="status-pill status-review">
+                <span class="status-dot pulsing"></span> {{ complaint.status }}
+              </span>
+            {% else %}
+              <span class="status-pill status-submitted">
+                <span class="status-dot"></span> Submitted
+              </span>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="track-sub-details">
+          <div class="sub-detail-item">
+            <span class="sub-label">Category:</span>
+            <span class="sub-val">{{ complaint.category|capitalize }}</span>
+          </div>
+          <div class="sub-detail-item">
+            <span class="sub-label">Issue:</span>
+            <span class="sub-val">{{ complaint.issue_type }}</span>
+          </div>
+          <div class="sub-detail-item">
+            <span class="sub-label">Submitted On:</span>
+            <span class="sub-val">{{ complaint.created_at.strftime('%d %b %Y, %I:%M %p') if complaint.created_at else '' }}</span>
+          </div>
+        </div>
+
+        <button type="button" class="btn-copy-track" id="btn-copy-id">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
+            <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+          </svg>
+          <span id="copy-feedback-text">Copy Tracking ID</span>
+        </button>
+      </div>
+
+      <!-- 2. Crowd Report Count Banner ("Reported by N citizens") -->
+      <div class="crowd-report-banner">
+        <div class="crowd-icon-circle">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </div>
+        <div class="crowd-content">
+          <div class="crowd-headline">
+            <strong>Reported by {{ complaint.report_count or 1 }} {% if (complaint.report_count or 1) == 1 %}citizen{% else %}citizens{% endif %}</strong>
+            {% if (complaint.report_count or 1) >= 3 %}
+              <span class="crowd-priority-tag">High Priority Escalation</span>
+            {% endif %}
+          </div>
+          <p class="crowd-desc">
+            {% if complaint.parent %}
+              This grievance was linked to nearby active report 
+              <a href="/track/{{ complaint.parent.tracking_id }}" class="nearby-ref-link">{{ complaint.parent.tracking_id }}</a> 
+              within 50 metres, elevating its priority with the municipal engineering wing.
+            {% elif (complaint.report_count or 1) >= 3 %}
+              Consensus reached with {{ complaint.report_count }} nearby citizen submissions. Priority raised automatically.
+            {% else %}
+              Individual citizen report logged in Tumakuru ward registry.
+            {% endif %}
+          </p>
+        </div>
+      </div>
+
+      <!-- 3. Vertical Timeline of StatusHistory -->
+      <div class="track-section-card">
+        <div class="section-card-header">
+          <div class="header-icon-title">
+            <span class="section-emoji">📋</span>
+            <h2 class="section-title">Status History &amp; Audit Log</h2>
+          </div>
+          <span class="timeline-step-count">{{ history_timeline|length }} updates</span>
+        </div>
+
+        <div class="vertical-timeline">
+          {% for h in history_timeline %}
+          <div class="timeline-item {% if loop.last %}latest-step{% endif %}">
+            <div class="timeline-line"></div>
+            <div class="timeline-marker">
+              {% if loop.last %}
+                <span class="marker-pulse"></span>
+              {% else %}
+                <span class="marker-dot"></span>
+              {% endif %}
+            </div>
+            
+            <div class="timeline-body">
+              <div class="timeline-meta-row">
+                <span class="timeline-status-badge status-{{ h.status|lower|replace(' ', '-') }}">
+                  {{ h.status }}
+                </span>
+                <span class="timeline-date">
+                  {{ h.changed_at.strftime('%d %b %Y, %I:%M %p') if h.changed_at else '' }}
+                </span>
+              </div>
+              <p class="timeline-note">{{ h.note or 'Status updated in municipal registry.' }}</p>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- 4. AI Summary and Severity Badge -->
+      <div class="ai-analysis-card">
+        <div class="ai-card-header">
+          <div class="ai-brand-badge">
+            <span class="ai-spark-icon">✨</span>
+            <span class="ai-card-title">AI Triage Assessment</span>
+          </div>
+          {% if complaint.severity %}
+            {% if complaint.severity <= 2 %}
+              <span class="severity-badge sev-green">Severity {{ complaint.severity }}/5 &bull; Minor</span>
+            {% elif complaint.severity == 3 %}
+              <span class="severity-badge sev-amber">Severity 3/5 &bull; Moderate</span>
+            {% else %}
+              <span class="severity-badge sev-red">Severity {{ complaint.severity }}/5 &bull; Critical</span>
+            {% endif %}
+          {% endif %}
+        </div>
+
+        {% if complaint.image_matches_report is not none and not complaint.image_matches_report %}
+        <div class="ai-warning-box">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="warning-icon">
+            <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <div class="warning-text">
+            <strong>Photo Verification Notice:</strong> The uploaded image may not clearly match the reported issue. A municipal field engineer will manually inspect the site.
+          </div>
+        </div>
+        {% endif %}
+
+        <div class="ai-field-block">
+          <span class="ai-field-label">DETECTED ISSUE:</span>
+          <p class="ai-field-val">{{ complaint.detected_issue or complaint.issue_type }}</p>
+        </div>
+
+        <div class="ai-field-block">
+          <span class="ai-field-label">SUMMARY:</span>
+          <div class="analysis-summary">
+            <p>{{ complaint.ai_summary or 'Awaiting initial municipal review.' }}</p>
+          </div>
+        </div>
+
+        {% if complaint.transcription %}
+        <div class="voice-transcript-block">
+          <div class="voice-transcript-card">
+            <div class="transcript-header-row">
+              <span class="transcript-mic-tag">🎙️ Spoken Grievance</span>
+              <span class="transcript-lang-tag">Transcribed &amp; Translated by Gemini</span>
+            </div>
+            <p class="transcript-text">"{{ complaint.transcription }}"</p>
+          </div>
+        </div>
+        {% endif %}
+
+        {% if complaint.reasons_list and complaint.reasons_list|length > 0 %}
+        <div class="ai-field-block">
+          <span class="ai-field-label">ASSESSMENT FACTORS:</span>
+          <ul class="analysis-reasons">
+            {% for reason in complaint.reasons_list %}
+              <li>{{ reason }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+
+        {% if complaint.suggested_action %}
+        <div class="analysis-action">
+          <span class="action-tag">SUGGESTED ACTION:</span>
+          <p>{{ complaint.suggested_action }}</p>
+        </div>
+        {% endif %}
+
+        <div class="ai-card-footer">
+          <span class="ai-disclaimer">&copy; AI suggestion - reviewed by an administrator</span>
+          <div class="ai-simulated-note">Simulated department workflow</div>
+        </div>
+      </div>
+
+      <!-- 5. Assigned Department Card -->
+      <div class="track-section-card">
+        <div class="section-card-header">
+          <div class="header-icon-title">
+            <span class="section-emoji">🏛️</span>
+            <h2 class="section-title">Assigned Department</h2>
+          </div>
+        </div>
+
+        <div class="dept-info-box">
+          <div class="dept-title-row">
+            <div class="dept-icon-circle">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M20 10v11M8 14v4M12 14v4M16 14v4"/>
+              </svg>
+            </div>
+            <div class="dept-names">
+              <h3 class="dept-name">
+                {% if complaint.department %}
+                  {{ complaint.department.name }}
+                {% elif complaint.category == 'road' %}
+                  Tumakuru City Corporation - Engineering Wing
+                {% elif complaint.category == 'water' %}
+                  Tumakuru City Corporation - Water Supply Wing
+                {% else %}
+                  Tumakuru City Corporation - Sanitation Wing
+                {% endif %}
+              </h3>
+              <span class="dept-category-tag">{{ complaint.category|capitalize }} Division</span>
+            </div>
+          </div>
+          
+          <div class="dept-contact-row">
+            <span class="dept-contact-label">Official Contact:</span>
+            <span class="dept-contact-val">
+              {% if complaint.department and complaint.department.contact_email %}
+                {{ complaint.department.contact_email }}
+              {% else %}
+                grievance.tumakuru@karnataka.gov.in
+              {% endif %}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 6. Submitted Photo & Evidence -->
+      <div class="track-section-card">
+        <div class="section-card-header">
+          <div class="header-icon-title">
+            <span class="section-emoji">📸</span>
+            <h2 class="section-title">Submitted Evidence</h2>
+          </div>
+        </div>
+
+        {% if complaint.photo_path %}
+        <div class="track-photo-container">
+          <img src="{{ url_for('static', filename=complaint.photo_path) }}" alt="Submitted grievance photo" class="track-evidence-img">
+        </div>
+        {% endif %}
+
+        {% if complaint.audio_path %}
+        <div class="track-audio-box" style="margin-top: 14px;">
+          <span class="summary-label" style="display:block; margin-bottom: 6px; font-weight: 700; color: #94a3b8; font-size: 12px;">Submitted Voice Note:</span>
+          <audio controls src="{{ url_for('static', filename=complaint.audio_path) }}" class="summary-audio-player"></audio>
+        </div>
+        {% endif %}
+
+        {% if complaint.description %}
+        <div class="track-description-box" style="margin-top: 14px;">
+          <span class="summary-label" style="display:block; margin-bottom: 6px; font-weight: 700; color: #94a3b8; font-size: 12px;">Citizen Description:</span>
+          <p class="track-desc-text">{{ complaint.description }}</p>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- 7. Small Leaflet Map with the Pin -->
+      <div class="track-section-card">
+        <div class="section-card-header">
+          <div class="header-icon-title">
+            <span class="section-emoji">📍</span>
+            <h2 class="section-title">Incident Location</h2>
+          </div>
+        </div>
+
+        <div id="track-map" class="track-map-container"></div>
+        
+        <div class="track-location-meta">
+          <div class="location-meta-row">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="pin-icon">
+              <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
+              <circle cx="12" cy="10" r="3"/>
+            </svg>
+            <span class="location-address-text">{{ complaint.address_text or 'Tumakuru, Karnataka' }}</span>
+          </div>
+          {% if complaint.latitude and complaint.longitude %}
+          <div class="location-coords-text">
+            Coordinates: {{ complaint.latitude }}, {{ complaint.longitude }}
+          </div>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+    </main>
+
+    <!-- Bottom Actions -->
+    <footer class="bottom-actions" style="margin-top: 28px;">
+      <a href="/" class="btn-quick-link" style="min-height: 52px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+          <polyline points="9 22 9 12 15 12 15 22"/>
+        </svg>
+        <span>Report Another Issue</span>
+      </a>
+
+      <div class="footer-meta">
+        <p>Tumakuru City Corporation &bull; CivicEye Portal</p>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    function setTrackingId(id) {
+      const input = document.getElementById('tracking-input');
+      if (input) {
+        input.value = id;
+        document.getElementById('track-search-form').submit();
+      }
+    }
+
+    const btnCopy = document.getElementById('btn-copy-id');
+    const copyText = document.getElementById('copy-feedback-text');
+    const codeDisplay = document.getElementById('track-id-display');
+
+    if (btnCopy && codeDisplay) {
+      btnCopy.addEventListener('click', () => {
+        const code = codeDisplay.textContent.trim();
+        navigator.clipboard.writeText(code).then(() => {
+          copyText.textContent = "Copied to Clipboard!";
+          btnCopy.classList.add('copied');
+          setTimeout(() => {
+            copyText.textContent = "Copy Tracking ID";
+            btnCopy.classList.remove('copied');
+          }, 2500);
+        }).catch(() => {
+          prompt("Tracking ID:", code);
+        });
+      });
+    }
+
+    {% if complaint %}
+    // Initialize Small Leaflet Map with Pin
+    document.addEventListener('DOMContentLoaded', function() {
+      const mapElem = document.getElementById('track-map');
+      if (!mapElem) return;
+
+      const lat = {{ complaint.latitude or 13.3392 }};
+      const lng = {{ complaint.longitude or 77.1140 }};
+
+      const map = L.map('track-map', {
+        center: [lat, lng],
+        zoom: 15,
+        zoomControl: true,
+        scrollWheelZoom: false
+      });
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap'
+      }).addTo(map);
+
+      const marker = L.marker([lat, lng]).addTo(map);
+      marker.bindPopup("<strong>{{ complaint.tracking_id }}</strong><br>{{ complaint.detected_issue or complaint.issue_type }}<br><span style='font-size:11px;color:#666;'>{{ complaint.address_text }}</span>").openPopup();
+
+      setTimeout(() => { map.invalidateSize(); }, 250);
+    });
+    {% endif %}
+  </script>
+</body>
+</html>
