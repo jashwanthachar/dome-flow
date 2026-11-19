@@ -291,6 +291,9 @@ def init_db():
     db.create_all()
     if Department.query.count() == 0:
         seed_departments()
+    if Complaint.query.count() == 0:
+        from seed_data import seed_complaints
+        seed_complaints()
 
 
 def generate_tracking_id():
