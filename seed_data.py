@@ -793,6 +793,13 @@ def seed_complaints():
         # Deterministic created_at timestamp spread over last 30 days
         created_dt = now - timedelta(days=item["days_ago"], hours=(item["severity"] * 3) % 12)
 
+        fix_verified = True if (item["status"] == "Resolved" and after_photo_path) else None
+        fix_note = (
+            f"Municipal repair completed; {item['detected_issue'].lower()} verified fixed."
+            if (item["status"] == "Resolved" and after_photo_path)
+            else ("Resolved via field team closure (Pending verification)." if item["status"] == "Resolved" else None)
+        )
+
         complaint = Complaint(
             tracking_id=item["tracking_id"],
             category=cat,
@@ -800,6 +807,8 @@ def seed_complaints():
             description=item["description"],
             photo_path=photo_path,
             after_photo_path=after_photo_path,
+            fix_verified=fix_verified,
+            fix_note=fix_note,
             audio_path=None,  # Public privacy requirement
             transcription=None,
             latitude=item["lat"],

@@ -165,6 +165,37 @@
           </div>
         </div>
 
+        {% if complaint.status == 'Resolved' %}
+        <div class="track-resolution-banner">
+          {% if complaint.fix_verified is true %}
+            <div class="fix-verification-content">
+              <span class="fix-badge verified">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+                AI-verified fix
+              </span>
+              {% if complaint.fix_note %}
+                <span class="fix-note-inline">{{ complaint.fix_note }}</span>
+              {% endif %}
+            </div>
+          {% else %}
+            <div class="fix-verification-content">
+              <span class="fix-badge pending">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <polyline points="12 6 12 12 16 14"/>
+                </svg>
+                Pending verification
+              </span>
+              {% if complaint.fix_note and complaint.fix_verified is false %}
+                <span class="fix-note-inline">{{ complaint.fix_note }}</span>
+              {% endif %}
+            </div>
+          {% endif %}
+        </div>
+        {% endif %}
+
         <button type="button" class="btn-copy-track" id="btn-copy-id">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
@@ -376,7 +407,18 @@
           </div>
         </div>
 
-        {% if complaint.photo_path %}
+        {% if complaint.photo_path and complaint.after_photo_path %}
+        <div class="evidence-photos-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="photo-item-box">
+            <span class="photo-type-label" style="display:block; margin-bottom: 6px; font-weight: 700; color: #94a3b8; font-size: 12px;">Before (Reported Defect)</span>
+            <img src="{{ url_for('static', filename=complaint.photo_path) }}" alt="Submitted grievance photo" class="track-evidence-img">
+          </div>
+          <div class="photo-item-box">
+            <span class="photo-type-label" style="display:block; margin-bottom: 6px; font-weight: 700; color: #94a3b8; font-size: 12px;">After (Municipal Fix)</span>
+            <img src="{{ url_for('static', filename=complaint.after_photo_path) }}" alt="Municipal resolution photo" class="track-evidence-img">
+          </div>
+        </div>
+        {% elif complaint.photo_path %}
         <div class="track-photo-container">
           <img src="{{ url_for('static', filename=complaint.photo_path) }}" alt="Submitted grievance photo" class="track-evidence-img">
         </div>

@@ -75,6 +75,15 @@
             <span class="status-meta-label">CURRENT STATUS</span>
             {% if complaint.status == 'Resolved' %}
               <span class="status-pill status-resolved">{{ complaint.status }}</span>
+              <div class="fix-status-row" style="margin-top: 6px;">
+                {% if complaint.fix_verified is true %}
+                  <span class="fix-badge verified">✓ AI-verified fix</span>
+                {% elif complaint.fix_verified is false %}
+                  <span class="fix-badge warning">⚠️ Manual resolution (Unverified)</span>
+                {% else %}
+                  <span class="fix-badge pending">⏳ Pending verification</span>
+                {% endif %}
+              </div>
             {% elif complaint.status == 'In Progress' %}
               <span class="status-pill status-progress">{{ complaint.status }}</span>
             {% elif complaint.status == 'Under Review' or complaint.status == 'Assigned' %}
@@ -116,7 +125,13 @@
                 <span class="photo-type-label">After (Resolution Photo)</span>
                 {% if complaint.after_photo_path %}
                   <img src="{{ url_for('static', filename=complaint.after_photo_path) }}" alt="Municipal resolution photo" class="evidence-img">
-                  <span class="photo-uploaded-tag">✓ Verified Resolution Photo</span>
+                  {% if complaint.fix_verified is true %}
+                    <span class="photo-uploaded-tag fix-tag-verified">✓ AI-verified fix: {{ complaint.fix_note or 'Issue repaired' }}</span>
+                  {% elif complaint.fix_verified is false %}
+                    <span class="photo-uploaded-tag fix-tag-warning">⚠️ Unverified fix: {{ complaint.fix_note or 'Flagged unresolved' }}</span>
+                  {% else %}
+                    <span class="photo-uploaded-tag fix-tag-pending">⏳ Pending verification</span>
+                  {% endif %}
                 {% else %}
                   <div class="no-photo-box after-placeholder">
                     <span>No resolution photo uploaded yet.</span>
@@ -317,6 +332,38 @@
                 <h2 class="section-title">Municipal Action Console</h2>
               </div>
             </div>
+
+            {% if ai_fix_warning %}
+            <div class="ai-fix-warning-card">
+              <div class="ai-warning-header">
+                <span class="warning-alert-icon">⚠️</span>
+                <div>
+                  <h3 class="warning-card-title">AI Verification: Issue Unresolved</h3>
+                  <span class="warning-confidence-text">Gemini Multimodal Confidence: {{ (ai_fix_warning.confidence * 100)|round|int }}%</span>
+                </div>
+              </div>
+              <div class="ai-warning-body">
+                <div class="warning-note-quote">"{{ ai_fix_warning.note }}"</div>
+                <p class="warning-explanation">
+                  AI inspection of the before and after photos indicates the civic issue is still present or unresolved. You may re-inspect or explicitly confirm resolution below.
+                </p>
+              </div>
+              <form action="/admin/complaint/{{ complaint.id }}" method="POST" class="resolve-anyway-form">
+                <input type="hidden" name="status" value="Resolved">
+                <input type="hidden" name="resolve_anyway" value="true">
+                <input type="hidden" name="status_note" value="{{ ai_fix_warning.pending_note }}">
+                <div class="warning-actions-row">
+                  <button type="submit" class="btn-resolve-anyway">
+                    <span>Confirm &amp; Resolve Anyway</span>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                  </button>
+                  <a href="/admin/complaint/{{ complaint.id }}" class="btn-cancel-warning">Cancel</a>
+                </div>
+              </form>
+            </div>
+            {% endif %}
 
             <form action="/admin/complaint/{{ complaint.id }}" method="POST" enctype="multipart/form-data" class="admin-manage-form">
               <!-- (c) Update Status -->

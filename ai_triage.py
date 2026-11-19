@@ -652,3 +652,199 @@ def analyze_complaint(
         print(f"[AI_TRIAGE_FALLBACK] {reason}", flush=True)
         logger.warning(reason)
         return fallback
+
+
+# -----------------------------------------------------------------------------
+# Resolution Fix Verification (Before vs After Photos)
+# -----------------------------------------------------------------------------
+
+class FixVerificationResult(BaseModel):
+    fixed: bool = Field(
+        description="True if the reported civic issue shown in the original before-photo has been repaired or resolved in the after-photo. False if the problem is still visible, unresolved, or if the after-photo shows an unrelated location."
+    )
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Confidence score between 0.0 and 1.0 reflecting certainty in whether the issue is fixed."
+    )
+    note: str = Field(
+        description="Exactly one concise sentence explaining what is observed in the after photo and whether the issue is fixed."
+    )
+
+
+def _call_gemini_verify_fix(
+    api_key: str,
+    model_name: str,
+    before_photo_path: str,
+    after_photo_path: str,
+    category: str = "road",
+    issue_type: str = "Pothole",
+    description: Optional[str] = None,
+) -> Dict[str, Any]:
+    from google import genai
+    from google.genai import types
+
+    timeout_ms = int(API_TIMEOUT_SECONDS * 1000)
+    client = genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(timeout=timeout_ms),
+    )
+
+    # Resolve and optimize both photos with Pillow (max 1024px longest side, JPEG quality 80)
+    resolved_before = os.path.abspath(before_photo_path) if not os.path.isabs(before_photo_path) else before_photo_path
+    resolved_after = os.path.abspath(after_photo_path) if not os.path.isabs(after_photo_path) else after_photo_path
+
+    if not os.path.exists(resolved_before):
+        raise FileNotFoundError(f"Original photo not found at: {before_photo_path}")
+    if not os.path.exists(resolved_after):
+        raise FileNotFoundError(f"After photo not found at: {after_photo_path}")
+
+    ai_before = optimize_image_for_ai(resolved_before, max_dimension=1024, quality=80)
+    ai_after = optimize_image_for_ai(resolved_after, max_dimension=1024, quality=80)
+
+    with open(ai_before, "rb") as f:
+        before_bytes = f.read()
+    with open(ai_after, "rb") as f:
+        after_bytes = f.read()
+
+    if not before_bytes or not after_bytes:
+        raise ValueError("Before or after photo file is empty (0 bytes).")
+
+    # Mime type detection
+    def get_mime(path):
+        mime, _ = mimetypes.guess_type(path)
+        if not mime or not mime.startswith("image/"):
+            ext = os.path.splitext(path)[1].lower()
+            return {
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".png": "image/png",
+                ".webp": "image/webp",
+            }.get(ext, "image/jpeg")
+        return mime
+
+    before_part = types.Part.from_bytes(data=before_bytes, mime_type=get_mime(ai_before))
+    after_part = types.Part.from_bytes(data=after_bytes, mime_type=get_mime(ai_after))
+
+    prompt = (
+        f"You are an expert municipal infrastructure inspector for Tumakuru City Corporation, Karnataka.\n\n"
+        f"Grievance Information:\n"
+        f"- Category: {category}\n"
+        f"- Reported Issue Type: {issue_type}\n"
+        f"- Citizen Description: {description or 'None provided'}\n\n"
+        f"You are provided two photos:\n"
+        f"Image 1 (first image) is the BEFORE photo showing the civic defect reported by the citizen.\n"
+        f"Image 2 (second image) is the AFTER photo submitted by the municipal field crew claiming the issue is resolved.\n\n"
+        f"Question: Is the reported issue fixed?\n"
+        f"Carefully evaluate whether the reported defect (e.g. pothole patched, garbage cleared, pipe leak repaired, drain cover replaced) is genuinely resolved in the after photo.\n"
+        f"- Return fixed=true if the work is completed and the issue is resolved.\n"
+        f"- Return fixed=false if the issue is still clearly present, unrepaired, or if the after photo is irrelevant/unrelated.\n"
+        f"Provide confidence (0.0 to 1.0) and exactly one concise sentence note explaining your visual finding."
+    )
+
+    config = types.GenerateContentConfig(
+        temperature=0.1,
+        response_mime_type="application/json",
+        response_schema=FixVerificationResult,
+    )
+
+    response = client.models.generate_content(
+        model=model_name,
+        contents=[before_part, after_part, prompt],
+        config=config,
+    )
+
+    raw_text = response.text or "{}"
+    data = json.loads(raw_text)
+    return data
+
+
+def verify_resolution_fix(
+    before_photo_path: str,
+    after_photo_path: str,
+    category: str = "road",
+    issue_type: str = "Pothole",
+    description: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Verifies whether a civic issue has been resolved by comparing the original before-photo
+    with the resolution after-photo using Gemini multimodal AI (downscaled to 1024px).
+
+    Returns a dictionary:
+    {
+        "fixed": bool,       # True/False
+        "confidence": float, # 0.0 to 1.0
+        "note": str,         # One sentence
+        "ai_available": bool # True if Gemini analyzed it, False if fallback
+    }
+    Never blocks or crashes on AI failure.
+    """
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key or api_key in ("paste-your-key-here", "your_api_key_here"):
+        logger.info("AI resolution verification skipped: GEMINI_API_KEY not configured.")
+        return {
+            "fixed": True,
+            "confidence": 0.0,
+            "note": "AI verification unavailable: API key not configured.",
+            "ai_available": False,
+        }
+
+    if not before_photo_path or not after_photo_path:
+        return {
+            "fixed": True,
+            "confidence": 0.0,
+            "note": "AI verification unavailable: missing before or after photo.",
+            "ai_available": False,
+        }
+
+    model_name = os.environ.get("GEMINI_MODEL", "").strip() or DEFAULT_GEMINI_MODEL
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                _call_gemini_verify_fix,
+                api_key=api_key,
+                model_name=model_name,
+                before_photo_path=before_photo_path,
+                after_photo_path=after_photo_path,
+                category=category,
+                issue_type=issue_type,
+                description=description,
+            )
+            raw_data = future.result(timeout=API_TIMEOUT_SECONDS)
+
+        fixed_val = bool(raw_data.get("fixed", False))
+        conf_val = float(raw_data.get("confidence", 0.9))
+        conf_val = max(0.0, min(1.0, conf_val))
+        note_val = str(raw_data.get("note", "")).strip()
+        if not note_val:
+            note_val = "Issue observed to be resolved in the after photo." if fixed_val else "Issue appears unresolved in the after photo."
+
+        logger.info(
+            "Gemini fix verification complete: fixed=%s, confidence=%.2f, note='%s'",
+            fixed_val, conf_val, note_val
+        )
+        return {
+            "fixed": fixed_val,
+            "confidence": conf_val,
+            "note": note_val,
+            "ai_available": True,
+        }
+
+    except concurrent.futures.TimeoutError:
+        logger.warning("Gemini fix verification timed out after %s seconds.", API_TIMEOUT_SECONDS)
+        return {
+            "fixed": True,
+            "confidence": 0.0,
+            "note": "AI verification unavailable: request timed out.",
+            "ai_available": False,
+        }
+    except Exception as exc:
+        logger.warning("Gemini fix verification error (%s): %s", exc.__class__.__name__, exc)
+        return {
+            "fixed": True,
+            "confidence": 0.0,
+            "note": f"AI verification unavailable: {exc}",
+            "ai_available": False,
+        }
+

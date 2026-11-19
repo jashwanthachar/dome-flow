@@ -13,7 +13,7 @@ from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session, flash
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
-from ai_triage import analyze_complaint, optimize_image_for_ai
+from ai_triage import analyze_complaint, optimize_image_for_ai, verify_resolution_fix
 
 basedir = os.path.abspath(os.path.dirname(__file__))
 load_dotenv(os.path.join(basedir, ".env"))
@@ -133,6 +133,8 @@ class Complaint(db.Model):
     suggested_action = db.Column(db.String(255), nullable=True)
     transcription = db.Column(db.Text, nullable=True)
     after_photo_path = db.Column(db.String(255), nullable=True)
+    fix_verified = db.Column(db.Boolean, nullable=True)
+    fix_note = db.Column(db.String(255), nullable=True)
     department_id = db.Column(db.Integer, db.ForeignKey("department.id"), nullable=True)
     created_at = db.Column(
         db.DateTime,
@@ -194,6 +196,8 @@ class Complaint(db.Model):
             "suggested_action": self.suggested_action,
             "transcription": self.transcription,
             "after_photo_path": self.after_photo_path,
+            "fix_verified": self.fix_verified,
+            "fix_note": self.fix_note,
             "department_id": self.department_id,
             "created_at": self.created_at.isoformat(),
         }
@@ -287,6 +291,16 @@ def init_db():
         if not required_cols.issubset(set(columns)):
             print("Detected missing columns in complaint table; dropping and recreating database...")
             db.drop_all()
+        else:
+            # Safely check and add fix verification columns if not already present
+            for col_name, col_type in [("fix_verified", "BOOLEAN"), ("fix_note", "VARCHAR(255)")]:
+                if col_name not in columns:
+                    try:
+                        with db.engine.connect() as conn:
+                            conn.execute(db.text(f"ALTER TABLE complaint ADD COLUMN {col_name} {col_type}"))
+                            conn.commit()
+                    except Exception as e:
+                        print(f"Column migration notice for {col_name}: {e}")
 
     db.create_all()
     if Department.query.count() == 0:
@@ -833,12 +847,202 @@ def admin_complaint_detail(complaint_id):
             except ValueError:
                 pass
 
+        # (d) Optionally upload an "after" photo (store as after_photo_path)
+        after_file = request.files.get("after_photo")
+        if after_file and after_file.filename:
+            ext = os.path.splitext(secure_filename(after_file.filename))[1].lower()
+            if ext not in [".jpg", ".jpeg", ".png", ".webp"]:
+                ext = ".jpg"
+            after_filename = f"after_{uuid.uuid4().hex[:14]}{ext}"
+            after_save_path = os.path.join(app.config["UPLOAD_FOLDER"], after_filename)
+            after_file.save(after_save_path)
+            complaint.after_photo_path = f"uploads/{after_filename}"
+
+            h_photo = StatusHistory(
+                complaint_id=complaint.id,
+                status=complaint.status,
+                note="Resolution 'after' photo uploaded by municipal admin"
+            )
+            db.session.add(h_photo)
+            changes_count += 1
+
         # (c) Update status through Submitted > Under Review > Assigned > In Progress > Resolved with note
         new_status = request.form.get("status", "").strip()
         status_note = request.form.get("status_note", "").strip()
+        resolve_anyway = request.form.get("resolve_anyway", "").strip().lower() in ("true", "1", "yes")
         valid_statuses = ["Submitted", "Under Review", "Assigned", "In Progress", "Resolved"]
 
-        if new_status and new_status in valid_statuses:
+        if new_status == "Resolved":
+            # Helper to resolve disk path for photos
+            def resolve_photo_disk_path(rel_path):
+                if not rel_path:
+                    return None
+                cand = os.path.join(basedir, "static", rel_path.lstrip("/\\"))
+                if os.path.exists(cand):
+                    return cand
+                cand_direct = os.path.join(basedir, rel_path.lstrip("/\\"))
+                if os.path.exists(cand_direct):
+                    return cand_direct
+                if os.path.exists(rel_path):
+                    return rel_path
+                return None
+
+            before_disk = resolve_photo_disk_path(complaint.photo_path)
+            after_disk = resolve_photo_disk_path(complaint.after_photo_path)
+
+            if before_disk and after_disk:
+                if resolve_anyway:
+                    # Admin explicitly confirmed resolution despite negative AI verification
+                    complaint.status = "Resolved"
+                    complaint.fix_verified = False
+                    override_note = complaint.fix_note or "Issue flagged as unresolved by AI"
+                    effective_note = f"Resolved anyway by admin override despite AI warning: {override_note}"
+                    if status_note:
+                        effective_note += f" | Admin note: {status_note}"
+                    h_status = StatusHistory(
+                        complaint_id=complaint.id,
+                        status="Resolved",
+                        note=effective_note
+                    )
+                    db.session.add(h_status)
+
+                    if complaint.children:
+                        for child in complaint.children:
+                            child.status = "Resolved"
+                            child.fix_verified = False
+                            child.fix_note = complaint.fix_note
+                            h_child = StatusHistory(
+                                complaint_id=child.id,
+                                status="Resolved",
+                                note=f"Status updated to Resolved (synced from parent {complaint.tracking_id}): {effective_note}"
+                            )
+                            db.session.add(h_child)
+                    changes_count += 1
+                else:
+                    # Verify resolution fix using Gemini multimodal
+                    fix_result = verify_resolution_fix(
+                        before_photo_path=before_disk,
+                        after_photo_path=after_disk,
+                        category=complaint.category,
+                        issue_type=complaint.issue_type,
+                        description=complaint.description,
+                    )
+
+                    if fix_result.get("ai_available") and not fix_result.get("fixed", True):
+                        # AI says NOT fixed: show warning and require explicit "Resolve anyway"
+                        complaint.fix_verified = False
+                        complaint.fix_note = fix_result.get("note", "Issue appears unresolved in the after photo.")
+                        db.session.commit()
+                        flash("AI Verification Warning: The issue appears unresolved in the after photo. Please review the warning or confirm 'Resolve anyway'.", "warning")
+
+                        ai_fix_warning = {
+                            "fixed": False,
+                            "confidence": fix_result.get("confidence", 0.0),
+                            "note": fix_result.get("note", "Issue appears unresolved in the after photo."),
+                            "pending_status": "Resolved",
+                            "pending_note": status_note,
+                        }
+                        history_timeline = (
+                            StatusHistory.query.filter_by(complaint_id=complaint.id)
+                            .order_by(StatusHistory.changed_at.asc(), StatusHistory.id.asc())
+                            .all()
+                        )
+                        return render_template(
+                            "admin_detail.html",
+                            complaint=complaint,
+                            departments=category_departments,
+                            history_timeline=history_timeline,
+                            ai_fix_warning=ai_fix_warning,
+                        )
+                    elif fix_result.get("ai_available") and fix_result.get("fixed", True):
+                        # Fix confirmed by AI
+                        complaint.status = "Resolved"
+                        complaint.fix_verified = True
+                        complaint.fix_note = fix_result.get("note", "AI inspection confirmed issue fixed.")
+                        effective_note = (
+                            f"{status_note} (AI-verified fix: {complaint.fix_note})"
+                            if status_note
+                            else f"Status updated to Resolved by admin (AI-verified fix: {complaint.fix_note})"
+                        )
+                        h_status = StatusHistory(
+                            complaint_id=complaint.id,
+                            status="Resolved",
+                            note=effective_note
+                        )
+                        db.session.add(h_status)
+
+                        if complaint.children:
+                            for child in complaint.children:
+                                child.status = "Resolved"
+                                child.fix_verified = True
+                                child.fix_note = complaint.fix_note
+                                h_child = StatusHistory(
+                                    complaint_id=child.id,
+                                    status="Resolved",
+                                    note=f"Status updated to Resolved (synced from parent {complaint.tracking_id}): {effective_note}"
+                                )
+                                db.session.add(h_child)
+                        changes_count += 1
+                    else:
+                        # AI unavailable or failed - Do not block resolving
+                        complaint.status = "Resolved"
+                        complaint.fix_verified = None
+                        complaint.fix_note = fix_result.get("note", "AI verification unavailable.")
+                        effective_note = (
+                            f"{status_note} (Pending verification)"
+                            if status_note
+                            else "Status updated to Resolved by admin (Pending verification)"
+                        )
+                        h_status = StatusHistory(
+                            complaint_id=complaint.id,
+                            status="Resolved",
+                            note=effective_note
+                        )
+                        db.session.add(h_status)
+
+                        if complaint.children:
+                            for child in complaint.children:
+                                child.status = "Resolved"
+                                child.fix_verified = None
+                                child.fix_note = complaint.fix_note
+                                h_child = StatusHistory(
+                                    complaint_id=child.id,
+                                    status="Resolved",
+                                    note=f"Status updated to Resolved (synced from parent {complaint.tracking_id}): {effective_note}"
+                                )
+                                db.session.add(h_child)
+                        changes_count += 1
+            else:
+                # No before or after photo to compare - resolve without blocking
+                complaint.status = "Resolved"
+                complaint.fix_verified = None
+                complaint.fix_note = "Resolved without before/after photo comparison."
+                effective_note = (
+                    f"{status_note} (Pending verification)"
+                    if status_note
+                    else "Status updated to Resolved by admin (Pending verification)"
+                )
+                h_status = StatusHistory(
+                    complaint_id=complaint.id,
+                    status="Resolved",
+                    note=effective_note
+                )
+                db.session.add(h_status)
+
+                if complaint.children:
+                    for child in complaint.children:
+                        child.status = "Resolved"
+                        child.fix_verified = None
+                        child.fix_note = complaint.fix_note
+                        h_child = StatusHistory(
+                            complaint_id=child.id,
+                            status="Resolved",
+                            note=f"Status updated to Resolved (synced from parent {complaint.tracking_id}): {effective_note}"
+                        )
+                        db.session.add(h_child)
+                changes_count += 1
+
+        elif new_status and new_status in valid_statuses:
             if new_status != complaint.status or status_note:
                 complaint.status = new_status
                 effective_note = status_note if status_note else f"Status updated to {new_status} by admin"
@@ -867,25 +1071,6 @@ def admin_complaint_detail(complaint_id):
                         db.session.add(h_child)
 
                 changes_count += 1
-
-        # (d) Optionally upload an "after" photo (store as after_photo_path)
-        after_file = request.files.get("after_photo")
-        if after_file and after_file.filename:
-            ext = os.path.splitext(secure_filename(after_file.filename))[1].lower()
-            if ext not in [".jpg", ".jpeg", ".png", ".webp"]:
-                ext = ".jpg"
-            after_filename = f"after_{uuid.uuid4().hex[:14]}{ext}"
-            after_save_path = os.path.join(app.config["UPLOAD_FOLDER"], after_filename)
-            after_file.save(after_save_path)
-            complaint.after_photo_path = f"uploads/{after_filename}"
-
-            h_photo = StatusHistory(
-                complaint_id=complaint.id,
-                status=complaint.status,
-                note="Resolution 'after' photo uploaded by municipal admin"
-            )
-            db.session.add(h_photo)
-            changes_count += 1
 
         if changes_count > 0:
             db.session.commit()
@@ -1077,6 +1262,8 @@ def dashboard():
             "resolution_time": format_resolution_time(res_sec),
             "resolved_date": resolved_date_str,
             "report_count": c.report_count or 1,
+            "fix_verified": c.fix_verified,
+            "fix_note": c.fix_note,
         })
 
     return render_template(

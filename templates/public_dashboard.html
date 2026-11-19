@@ -274,6 +274,29 @@
               <span class="fixed-time-badge">Resolved in {{ item.resolution_time }}</span>
             </div>
 
+            <!-- AI-verified fix / Pending verification Badge -->
+            <div class="fixed-verification-row">
+              {% if item.fix_verified %}
+                <span class="fix-badge verified">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                  AI-verified fix
+                </span>
+                {% if item.fix_note %}
+                  <span class="fixed-fix-note" title="{{ item.fix_note }}">{{ item.fix_note }}</span>
+                {% endif %}
+              {% else %}
+                <span class="fix-badge pending">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <polyline points="12 6 12 12 16 14"/>
+                  </svg>
+                  Pending verification
+                </span>
+              {% endif %}
+            </div>
+
             <!-- Before / After Photos -->
             <div class="evidence-photos-wrap">
               <!-- Before Photo -->
