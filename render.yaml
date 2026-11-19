@@ -13,8 +13,6 @@ services:
         value: gemini-3.1-flash-lite
       - key: GEMINI_FALLBACK_MODEL
         sync: false
-      - key: DEBUG_TOKEN
-        value: civiceye123
       - key: ADMIN_PASSWORD
         sync: false
       - key: SECRET_KEY

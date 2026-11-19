@@ -30,6 +30,8 @@
 
 html, body {
   min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
   background-color: var(--bg-app);
   color: var(--text-main);
   font-family: var(--font-sans);
@@ -3807,6 +3809,116 @@ html, body {
   background: rgba(255, 255, 255, 0.15);
   color: #ffffff;
 }
+
+/* ==========================================================================
+   Mobile Viewport (375px) Optimization & Tap Target Compliance
+   ========================================================================== */
+@media (max-width: 480px) {
+  .mobile-container {
+    padding: 16px 14px 28px;
+  }
+
+  /* Ensure comfortable touch targets (minimum 44px) */
+  .btn-submit-report,
+  .btn-track-submit,
+  .btn-voice-record,
+  .btn-copy-track,
+  .btn-dash-action,
+  .btn-nav-link,
+  .btn-nav-back,
+  .btn-logout,
+  .header-dashboard-link {
+    min-height: 44px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .btn-sample-id {
+    min-height: 36px;
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .btn-clear-search {
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Navbar wrapping to prevent overflow */
+  .admin-navbar,
+  .dash-navbar {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .admin-nav-right,
+  .dash-nav-right {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  /* Header brand row */
+  .brand-row {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .brand-name {
+    font-size: 22px;
+  }
+
+  .hero-tagline {
+    font-size: 22px;
+  }
+
+  /* Ensure cards and forms fit within 375px without horizontal scrolling */
+  .action-card,
+  .track-status-header-card,
+  .track-section-card,
+  .ai-analysis-card,
+  .admin-action-card,
+  .dash-card {
+    padding: 16px 14px;
+    border-radius: 14px;
+  }
+
+  /* Prevent table blowout */
+  .table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -4px;
+  }
+
+  /* Leaflet map containers */
+  .track-map-container,
+  .map-container,
+  #map,
+  #track-map,
+  #admin-map,
+  #dashboard-map {
+    max-width: 100%;
+    width: 100% !important;
+  }
+
+  /* Search input width */
+  .track-search-input-wrap {
+    width: 100%;
+  }
+
+  /* Form field inputs and select dropdowns */
+  .form-select,
+  .form-textarea,
+  .admin-text-input {
+    min-height: 44px;
+    font-size: 14px;
+  }
+}
+
 
 
 

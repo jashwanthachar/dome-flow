@@ -4,7 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#0f172a">
-  <title>{% if complaint %}Track {{ complaint.tracking_id }} - CivicEye{% else %}Track Grievance - CivicEye Tumakuru{% endif %}</title>
+  <meta name="description" content="Track live municipal resolution status, AI triage assessment, and official timeline for grievances in Tumakuru.">
+  <title>{% if complaint %}Track {{ complaint.tracking_id }} - CivicEye Tumakuru{% else %}Track Complaint Status - CivicEye Tumakuru{% endif %}</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
   
   <!-- Leaflet OpenStreetMap CDN -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
@@ -422,7 +424,7 @@
         </div>
 
         {% if complaint.photo_path and complaint.after_photo_path %}
-        <div class="evidence-photos-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+        <div class="evidence-photos-grid">
           <div class="photo-item-box">
             <span class="photo-type-label" style="display:block; margin-bottom: 6px; font-weight: 700; color: #94a3b8; font-size: 12px;">Before (Reported Defect)</span>
             <img src="{{ url_for('static', filename=complaint.photo_path) }}" alt="Submitted grievance photo" class="track-evidence-img">

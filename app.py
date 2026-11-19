@@ -10,7 +10,7 @@ import math
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, jsonify, session, flash
+from flask import Flask, render_template, request, redirect, url_for, jsonify, session, flash, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
 from ai_triage import analyze_complaint, optimize_image_for_ai, verify_resolution_fix
@@ -1307,63 +1307,16 @@ def api_status():
     }), 200
 
 
-@app.route("/debug/ai")
-def debug_ai():
-    """
-    Temporary diagnostic route for testing Gemini API connection.
-    Protected by ?token= matching env var DEBUG_TOKEN.
-    """
-    expected_token = os.environ.get("DEBUG_TOKEN", "").strip()
-    provided_token = request.args.get("token", "").strip()
+@app.route("/favicon.ico")
+def favicon():
+    """Serve favicon from static folder."""
+    return send_from_directory(os.path.join(basedir, "static"), "favicon.svg", mimetype="image/svg+xml")
 
-    if not expected_token or provided_token != expected_token:
-        return jsonify({
-            "error": "Unauthorized. Make sure DEBUG_TOKEN is set in Render environment and passed as ?token=..."
-        }), 403
 
-    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-    model_name = os.environ.get("GEMINI_MODEL", "").strip() or "gemini-2.5-flash"
-    key_present = bool(api_key and api_key not in ("paste-your-key-here", "your_api_key_here"))
-
-    if not key_present:
-        return jsonify({
-            "key_present": False,
-            "model_name": model_name,
-            "success": False,
-            "error": "GEMINI_API_KEY is not set or empty in environment."
-        }), 200
-
-    try:
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(
-            api_key=api_key,
-            http_options=types.HttpOptions(timeout=20000),  # 20-second timeout
-        )
-        resp = client.models.generate_content(
-            model=model_name,
-            contents="Reply with the word OK",
-            config=types.GenerateContentConfig(
-                temperature=0.0,
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
-            )
-        )
-        reply_text = resp.text.strip() if resp.text else ""
-        return jsonify({
-            "key_present": True,
-            "model_name": model_name,
-            "success": True,
-            "response": reply_text,
-            "error": None
-        }), 200
-    except Exception as exc:
-        return jsonify({
-            "key_present": True,
-            "model_name": model_name,
-            "success": False,
-            "error": f"{exc.__class__.__name__}: {str(exc)}"
-        }), 200
+@app.errorhandler(404)
+def page_not_found(e):
+    """Render friendly 404 error page."""
+    return render_template("404.html"), 404
 
 
 if __name__ == "__main__":
