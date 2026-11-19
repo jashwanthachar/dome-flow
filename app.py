@@ -127,6 +127,7 @@ class Complaint(db.Model):
     image_matches_report = db.Column(db.Boolean, nullable=True)
     ai_confidence = db.Column(db.Float, nullable=True)
     ai_source = db.Column(db.String(20), nullable=True)  # "gemini" or "fallback"
+    ai_model = db.Column(db.String(100), nullable=True)
     parent_id = db.Column(db.Integer, db.ForeignKey("complaint.id"), nullable=True)
     report_count = db.Column(db.Integer, default=1, nullable=False)
     detected_issue = db.Column(db.String(150), nullable=True)
@@ -190,6 +191,7 @@ class Complaint(db.Model):
             "image_matches_report": self.image_matches_report,
             "ai_confidence": self.ai_confidence,
             "ai_source": self.ai_source,
+            "ai_model": self.ai_model,
             "parent_id": self.parent_id,
             "report_count": self.report_count,
             "detected_issue": self.detected_issue,
@@ -292,8 +294,8 @@ def init_db():
             print("Detected missing columns in complaint table; dropping and recreating database...")
             db.drop_all()
         else:
-            # Safely check and add fix verification columns if not already present
-            for col_name, col_type in [("fix_verified", "BOOLEAN"), ("fix_note", "VARCHAR(255)")]:
+            # Safely check and add fix verification and ai_model columns if not already present
+            for col_name, col_type in [("fix_verified", "BOOLEAN"), ("fix_note", "VARCHAR(255)"), ("ai_model", "VARCHAR(100)")]:
                 if col_name not in columns:
                     try:
                         with db.engine.connect() as conn:
@@ -515,6 +517,7 @@ def report(category):
             complaint.image_matches_report = nearby_parent.image_matches_report
             complaint.ai_confidence = nearby_parent.ai_confidence
             complaint.ai_source = nearby_parent.ai_source or "gemini"
+            complaint.ai_model = nearby_parent.ai_model
             complaint.department_id = nearby_parent.department_id
 
             # Audit note for inherited AI triage
@@ -575,6 +578,7 @@ def report(category):
         complaint.image_matches_report = triage.get("image_matches_report")
         complaint.ai_confidence = triage.get("confidence")
         complaint.ai_source = triage.get("ai_source", "gemini")
+        complaint.ai_model = triage.get("ai_model")
         complaint.detected_issue = triage.get("detected_issue") or issue_type
         complaint.suggested_action = triage.get("suggested_action")
 

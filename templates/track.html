@@ -279,7 +279,13 @@
         <div class="ai-card-header">
           <div class="ai-brand-badge">
             <span class="ai-spark-icon">✨</span>
-            <span class="ai-card-title">AI Triage Assessment</span>
+            <span class="ai-card-title">
+              {% if complaint.ai_model %}
+                Analyzed by Gemini
+              {% else %}
+                Basic analysis, AI unavailable
+              {% endif %}
+            </span>
           </div>
           {% if complaint.severity %}
             {% if complaint.severity <= 2 %}
@@ -348,7 +354,15 @@
         {% endif %}
 
         <div class="ai-card-footer">
-          <span class="ai-disclaimer">&copy; AI suggestion - reviewed by an administrator</span>
+          <span class="ai-disclaimer">
+            &copy;
+            {% if complaint.ai_model %}
+              Analyzed by Gemini
+            {% else %}
+              Basic analysis, AI unavailable
+            {% endif %}
+            - reviewed by an administrator
+          </span>
           <div class="ai-simulated-note">Simulated department workflow</div>
         </div>
       </div>

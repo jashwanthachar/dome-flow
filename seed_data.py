@@ -821,6 +821,7 @@ def seed_complaints():
             detected_issue=item["detected_issue"],
             suggested_action=item["suggested_action"],
             ai_source="seed",
+            ai_model="gemini-seed",
             ai_confidence=0.92,
             image_matches_report=True,
             parent_id=None,

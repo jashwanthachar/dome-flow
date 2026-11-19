@@ -76,7 +76,13 @@
         <div class="ai-card-header">
           <div class="ai-brand-badge">
             <span class="ai-spark-icon">✨</span>
-            <span class="ai-card-title">AI Analysis</span>
+            <span class="ai-card-title">
+              {% if complaint.ai_model %}
+                Analyzed by Gemini
+              {% else %}
+                Basic analysis, AI unavailable
+              {% endif %}
+            </span>
           </div>
           {% if complaint.severity %}
             {% if complaint.severity <= 2 %}
@@ -159,7 +165,14 @@
               <line x1="12" y1="16" x2="12" y2="12"/>
               <line x1="12" y1="8" x2="12.01" y2="8"/>
             </svg>
-            <span>AI suggestion - reviewed by an administrator</span>
+            <span>
+              {% if complaint.ai_model %}
+                Analyzed by Gemini
+              {% else %}
+                Basic analysis, AI unavailable
+              {% endif %}
+              &bull; reviewed by an administrator
+            </span>
           </div>
           <div class="ai-simulated-note">Simulated department workflow</div>
         </div>

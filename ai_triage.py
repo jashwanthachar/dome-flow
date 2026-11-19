@@ -4,6 +4,7 @@ Multimodal grievance analysis using the official google-genai SDK for Tumakuru, 
 """
 
 import os
+import time
 import json
 import logging
 import mimetypes
@@ -301,6 +302,7 @@ def get_rule_based_fallback(
         "recommended_department_type": cat_key,
         "confidence": 0.75,
         "ai_source": "fallback",
+        "ai_model": None,
         "transcription": None,
         "original_language": None,
     }
@@ -389,6 +391,7 @@ def _sanitize_result(raw_dict: Dict[str, Any], fallback: Dict[str, Any]) -> Dict
         "recommended_department_type": dept_type,
         "confidence": confidence,
         "ai_source": ai_source,
+        "ai_model": raw_dict.get("ai_model") or fallback.get("ai_model"),
         "transcription": transcription,
         "original_language": original_language,
     }
@@ -565,6 +568,22 @@ def _call_gemini_api(
     return data
 
 
+def _is_rate_limit_or_unavailable(exc: Exception) -> bool:
+    """Detect HTTP 503 (Service Unavailable) or 429 (Resource Exhausted / Rate Limit)."""
+    code = getattr(exc, "code", None)
+    if code in (503, 429):
+        return True
+    status_code = getattr(exc, "status_code", None)
+    if status_code in (503, 429):
+        return True
+    err_str = str(exc).lower()
+    if "503" in err_str or "429" in err_str:
+        return True
+    if "resource_exhausted" in err_str or "unavailable" in err_str or "quota" in err_str:
+        return True
+    return False
+
+
 # -----------------------------------------------------------------------------
 # Public API Function
 # -----------------------------------------------------------------------------
@@ -599,6 +618,8 @@ def analyze_complaint(
         - confidence (float: 0.0-1.0)
         - transcription (Optional[str]: English translation of audio)
         - original_language (Optional[str])
+        - ai_source (str: 'gemini' or 'fallback')
+        - ai_model (Optional[str]: name of model that answered)
     """
     fallback = get_rule_based_fallback(category, issue_type, description)
 
@@ -607,51 +628,78 @@ def analyze_complaint(
         reason = "GEMINI_API_KEY environment variable is missing, empty, or a placeholder."
         print(f"[AI_TRIAGE_FALLBACK] {reason}", flush=True)
         logger.warning(reason)
+        logger.info("AI triage answered by model: None (rule-based fallback)")
         return fallback
 
     if not photo_path:
         reason = "No photo_path provided for complaint."
         print(f"[AI_TRIAGE_FALLBACK] {reason}", flush=True)
         logger.warning(reason)
+        logger.info("AI triage answered by model: None (rule-based fallback)")
         return fallback
 
-    model_name = os.environ.get("GEMINI_MODEL", "").strip() or DEFAULT_GEMINI_MODEL
+    primary_model = os.environ.get("GEMINI_MODEL", "").strip() or DEFAULT_GEMINI_MODEL
+    fallback_model = os.environ.get("GEMINI_FALLBACK_MODEL", "").strip()
 
-    try:
-        # Enforce 10-second timeout guard
+    raw_data = None
+    answering_model = None
+
+    def _execute_model_call(m_name: str) -> Dict[str, Any]:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(
                 _call_gemini_api,
                 api_key=api_key,
-                model_name=model_name,
+                model_name=m_name,
                 category=category,
                 issue_type=issue_type,
                 description=description,
                 photo_path=photo_path,
                 audio_path=audio_path,
             )
-            raw_data = future.result(timeout=API_TIMEOUT_SECONDS)
+            return future.result(timeout=API_TIMEOUT_SECONDS)
 
-        result = _sanitize_result(raw_data, fallback)
-        logger.info(
-            "Gemini triage successful: %s | Severity: %s | Confidence: %.2f",
-            result["detected_issue"],
-            result["severity"],
-            result["confidence"],
-        )
-        return result
-
-    except concurrent.futures.TimeoutError:
-        reason = f"Gemini AI triage call timed out after {API_TIMEOUT_SECONDS} seconds."
-        print(f"[AI_TRIAGE_FALLBACK] {reason}", flush=True)
-        logger.warning(reason)
-        return fallback
+    # 1. Primary model call
+    try:
+        raw_data = _execute_model_call(primary_model)
+        answering_model = primary_model
     except Exception as exc:
-        # Never log the secret key
-        reason = f"Gemini AI triage exception: {exc.__class__.__name__}: {exc}"
+        logger.warning("Primary model %s failed: %s (%s)", primary_model, exc.__class__.__name__, exc)
+        # 2. One retry after 2 seconds on 503/429
+        if _is_rate_limit_or_unavailable(exc):
+            logger.info("Transient 503/429 error on primary model %s; retrying once after 2 seconds...", primary_model)
+            time.sleep(2)
+            try:
+                raw_data = _execute_model_call(primary_model)
+                answering_model = primary_model
+            except Exception as retry_exc:
+                logger.warning("Retry on primary model %s failed: %s (%s)", primary_model, retry_exc.__class__.__name__, retry_exc)
+                raw_data = None
+        else:
+            raw_data = None
+
+    # 3. Fallback model from GEMINI_FALLBACK_MODEL
+    if raw_data is None and fallback_model and fallback_model != primary_model:
+        logger.info("Attempting fallback model from GEMINI_FALLBACK_MODEL: %s", fallback_model)
+        try:
+            raw_data = _execute_model_call(fallback_model)
+            answering_model = fallback_model
+        except Exception as fb_exc:
+            logger.warning("Fallback model %s failed: %s (%s)", fallback_model, fb_exc.__class__.__name__, fb_exc)
+            raw_data = None
+
+    # 4. Rule-based fallback if all models failed
+    if raw_data is None:
+        reason = "All Gemini models failed or unavailable; using rule-based fallback."
         print(f"[AI_TRIAGE_FALLBACK] {reason}", flush=True)
-        logger.warning(reason)
+        logger.info("AI triage answered by model: None (rule-based fallback)")
         return fallback
+
+    raw_data["ai_model"] = answering_model
+    result = _sanitize_result(raw_data, fallback)
+    result["ai_model"] = answering_model
+    logger.info("AI triage answered by model: %s", answering_model)
+    print(f"[AI_TRIAGE] Answered by model: {answering_model}", flush=True)
+    return result
 
 
 # -----------------------------------------------------------------------------
@@ -797,54 +845,76 @@ def verify_resolution_fix(
             "ai_available": False,
         }
 
-    model_name = os.environ.get("GEMINI_MODEL", "").strip() or DEFAULT_GEMINI_MODEL
+    primary_model = os.environ.get("GEMINI_MODEL", "").strip() or DEFAULT_GEMINI_MODEL
+    fallback_model = os.environ.get("GEMINI_FALLBACK_MODEL", "").strip()
 
-    try:
+    def _execute_fix_call(m_name: str) -> Dict[str, Any]:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(
                 _call_gemini_verify_fix,
                 api_key=api_key,
-                model_name=model_name,
+                model_name=m_name,
                 before_photo_path=before_photo_path,
                 after_photo_path=after_photo_path,
                 category=category,
                 issue_type=issue_type,
                 description=description,
             )
-            raw_data = future.result(timeout=API_TIMEOUT_SECONDS)
+            return future.result(timeout=API_TIMEOUT_SECONDS)
 
-        fixed_val = bool(raw_data.get("fixed", False))
-        conf_val = float(raw_data.get("confidence", 0.9))
-        conf_val = max(0.0, min(1.0, conf_val))
-        note_val = str(raw_data.get("note", "")).strip()
-        if not note_val:
-            note_val = "Issue observed to be resolved in the after photo." if fixed_val else "Issue appears unresolved in the after photo."
+    raw_data = None
+    answering_model = None
 
-        logger.info(
-            "Gemini fix verification complete: fixed=%s, confidence=%.2f, note='%s'",
-            fixed_val, conf_val, note_val
-        )
-        return {
-            "fixed": fixed_val,
-            "confidence": conf_val,
-            "note": note_val,
-            "ai_available": True,
-        }
-
-    except concurrent.futures.TimeoutError:
-        logger.warning("Gemini fix verification timed out after %s seconds.", API_TIMEOUT_SECONDS)
-        return {
-            "fixed": True,
-            "confidence": 0.0,
-            "note": "AI verification unavailable: request timed out.",
-            "ai_available": False,
-        }
+    try:
+        raw_data = _execute_fix_call(primary_model)
+        answering_model = primary_model
     except Exception as exc:
-        logger.warning("Gemini fix verification error (%s): %s", exc.__class__.__name__, exc)
+        logger.warning("Primary fix verification model %s failed: %s (%s)", primary_model, exc.__class__.__name__, exc)
+        if _is_rate_limit_or_unavailable(exc):
+            logger.info("Transient 503/429 error on %s; retrying fix verification once after 2 seconds...", primary_model)
+            time.sleep(2)
+            try:
+                raw_data = _execute_fix_call(primary_model)
+                answering_model = primary_model
+            except Exception as retry_exc:
+                logger.warning("Retry on primary fix verification model %s failed: %s", primary_model, retry_exc)
+                raw_data = None
+        else:
+            raw_data = None
+
+    if raw_data is None and fallback_model and fallback_model != primary_model:
+        logger.info("Attempting fallback fix verification model from GEMINI_FALLBACK_MODEL: %s", fallback_model)
+        try:
+            raw_data = _execute_fix_call(fallback_model)
+            answering_model = fallback_model
+        except Exception as fb_exc:
+            logger.warning("Fallback fix verification model %s failed: %s", fallback_model, fb_exc)
+            raw_data = None
+
+    if raw_data is None:
+        logger.warning("All Gemini fix verification models failed or timed out.")
         return {
             "fixed": True,
             "confidence": 0.0,
-            "note": f"AI verification unavailable: {exc}",
+            "note": "AI verification unavailable: all models failed or timed out.",
             "ai_available": False,
         }
+
+    fixed_val = bool(raw_data.get("fixed", False))
+    conf_val = float(raw_data.get("confidence", 0.9))
+    conf_val = max(0.0, min(1.0, conf_val))
+    note_val = str(raw_data.get("note", "")).strip()
+    if not note_val:
+        note_val = "Issue observed to be resolved in the after photo." if fixed_val else "Issue appears unresolved in the after photo."
+
+    logger.info(
+        "Gemini fix verification complete (model: %s): fixed=%s, confidence=%.2f, note='%s'",
+        answering_model, fixed_val, conf_val, note_val
+    )
+    return {
+        "fixed": fixed_val,
+        "confidence": conf_val,
+        "note": note_val,
+        "ai_available": True,
+    }
 
