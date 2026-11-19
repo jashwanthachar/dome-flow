@@ -79,7 +79,9 @@
           <div class="ai-brand-badge">
             <span class="ai-spark-icon">✨</span>
             <span class="ai-card-title">
-              {% if complaint.ai_model %}
+              {% if complaint.ai_source == 'seed' %}
+                <span class="sample-data-label">Sample data</span>
+              {% elif complaint.ai_model %}
                 Analyzed by Gemini
               {% else %}
                 Basic analysis, AI unavailable
@@ -168,7 +170,9 @@
               <line x1="12" y1="8" x2="12.01" y2="8"/>
             </svg>
             <span>
-              {% if complaint.ai_model %}
+              {% if complaint.ai_source == 'seed' %}
+                Sample data
+              {% elif complaint.ai_model %}
                 Analyzed by Gemini
               {% else %}
                 Basic analysis, AI unavailable

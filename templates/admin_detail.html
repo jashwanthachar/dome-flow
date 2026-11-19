@@ -78,7 +78,9 @@
             {% if complaint.status == 'Resolved' %}
               <span class="status-pill status-resolved">{{ complaint.status }}</span>
               <div class="fix-status-row" style="margin-top: 6px;">
-                {% if complaint.fix_verified is true %}
+                {% if complaint.ai_source == 'seed' %}
+                  <span class="fix-badge sample">Sample fix (demo data)</span>
+                {% elif complaint.fix_verified is true %}
                   <span class="fix-badge verified">✓ AI-verified fix</span>
                 {% elif complaint.fix_verified is false %}
                   <span class="fix-badge warning">⚠️ Manual resolution (Unverified)</span>
@@ -127,7 +129,9 @@
                 <span class="photo-type-label">After (Resolution Photo)</span>
                 {% if complaint.after_photo_path %}
                   <img src="{{ url_for('static', filename=complaint.after_photo_path) }}" alt="Municipal resolution photo" class="evidence-img">
-                  {% if complaint.fix_verified is true %}
+                  {% if complaint.ai_source == 'seed' %}
+                    <span class="photo-uploaded-tag fix-tag-sample">Sample fix (demo data)</span>
+                  {% elif complaint.fix_verified is true %}
                     <span class="photo-uploaded-tag fix-tag-verified">✓ AI-verified fix: {{ complaint.fix_note or 'Issue repaired' }}</span>
                   {% elif complaint.fix_verified is false %}
                     <span class="photo-uploaded-tag fix-tag-warning">⚠️ Unverified fix: {{ complaint.fix_note or 'Flagged unresolved' }}</span>
@@ -232,7 +236,11 @@
             {% endif %}
 
             <div class="ai-card-footer">
-              <span class="ai-disclaimer">Source: {{ complaint.ai_source or 'gemini' }} &bull; Confidence: {{ (complaint.ai_confidence * 100)|int if complaint.ai_confidence else 'N/A' }}%</span>
+              {% if complaint.ai_source == 'seed' %}
+                <span class="ai-disclaimer">Source: sample seed data (demonstration)</span>
+              {% else %}
+                <span class="ai-disclaimer">Source: {{ complaint.ai_source or 'gemini' }}{% if complaint.ai_confidence %} &bull; Confidence: {{ (complaint.ai_confidence * 100)|int }}%{% endif %}</span>
+              {% endif %}
               <div class="ai-simulated-note">Simulated department workflow</div>
             </div>
           </div>

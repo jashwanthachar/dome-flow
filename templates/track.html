@@ -169,7 +169,16 @@
 
         {% if complaint.status == 'Resolved' %}
         <div class="track-resolution-banner">
-          {% if complaint.fix_verified is true %}
+          {% if complaint.ai_source == 'seed' %}
+            <div class="fix-verification-content">
+              <span class="fix-badge sample">
+                Sample fix (demo data)
+              </span>
+              {% if complaint.fix_note %}
+                <span class="fix-note-inline">{{ complaint.fix_note }}</span>
+              {% endif %}
+            </div>
+          {% elif complaint.fix_verified is true %}
             <div class="fix-verification-content">
               <span class="fix-badge verified">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -282,7 +291,9 @@
           <div class="ai-brand-badge">
             <span class="ai-spark-icon">✨</span>
             <span class="ai-card-title">
-              {% if complaint.ai_model %}
+              {% if complaint.ai_source == 'seed' %}
+                <span class="sample-data-label">Sample data</span>
+              {% elif complaint.ai_model %}
                 Analyzed by Gemini
               {% else %}
                 Basic analysis, AI unavailable
@@ -358,7 +369,9 @@
         <div class="ai-card-footer">
           <span class="ai-disclaimer">
             &copy;
-            {% if complaint.ai_model %}
+            {% if complaint.ai_source == 'seed' %}
+              Sample data
+            {% elif complaint.ai_model %}
               Analyzed by Gemini
             {% else %}
               Basic analysis, AI unavailable

@@ -23,7 +23,7 @@ def get_seed_photos(category_folder):
     files = []
     for f in sorted(os.listdir(folder_path)):
         if os.path.splitext(f.lower())[1] in valid_exts:
-            files.append(f"static/seed/{category_folder}/{f}")
+            files.append(f"seed/{category_folder}/{f}")
     return files
 
 
@@ -821,8 +821,8 @@ def seed_complaints():
             detected_issue=item["detected_issue"],
             suggested_action=item["suggested_action"],
             ai_source="seed",
-            ai_model="gemini-seed",
-            ai_confidence=0.92,
+            ai_model=None,
+            ai_confidence=None,
             image_matches_report=True,
             parent_id=None,
             report_count=item["report_count"],

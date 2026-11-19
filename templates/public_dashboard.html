@@ -276,9 +276,16 @@
               <span class="fixed-time-badge">Resolved in {{ item.resolution_time }}</span>
             </div>
 
-            <!-- AI-verified fix / Pending verification Badge -->
+            <!-- Resolution verification badge -->
             <div class="fixed-verification-row">
-              {% if item.fix_verified %}
+              {% if item.ai_source == 'seed' %}
+                <span class="fix-badge sample">
+                  Sample fix (demo data)
+                </span>
+                {% if item.fix_note %}
+                  <span class="fixed-fix-note" title="{{ item.fix_note }}">{{ item.fix_note }}</span>
+                {% endif %}
+              {% elif item.fix_verified %}
                 <span class="fix-badge verified">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                     <polyline points="20 6 9 17 4 12"/>

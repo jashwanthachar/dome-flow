@@ -1268,6 +1268,7 @@ def dashboard():
             "report_count": c.report_count or 1,
             "fix_verified": c.fix_verified,
             "fix_note": c.fix_note,
+            "ai_source": c.ai_source,
         })
 
     return render_template(
