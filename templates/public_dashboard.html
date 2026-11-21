@@ -202,6 +202,7 @@
                 <th>Category</th>
                 <th style="text-align: center;">Open</th>
                 <th style="text-align: center;">Resolved</th>
+                <th style="text-align: center;">% Resolved within SLA</th>
                 <th style="text-align: center;">Total Assigned</th>
                 <th style="text-align: right;">Avg. Resolution Time</th>
               </tr>
@@ -228,6 +229,11 @@
                 </td>
                 <td style="text-align: center;">
                   <span class="status-counter-pill resolved">{{ dept.resolved_count }}</span>
+                </td>
+                <td style="text-align: center;">
+                  <span class="sla-pct-pill {% if dept.sla_percent != 'N/A' %}active{% endif %}">
+                    {{ dept.sla_percent }}
+                  </span>
                 </td>
                 <td style="text-align: center;">
                   <span class="total-assigned-num">{{ dept.total_count }}</span>

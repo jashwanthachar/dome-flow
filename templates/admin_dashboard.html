@@ -156,6 +156,7 @@
                 <th>Severity</th>
                 <th>Reports</th>
                 <th>Status</th>
+                <th>SLA / Due</th>
                 <th>Assigned Dept</th>
                 <th>Submitted</th>
                 <th>Action</th>
@@ -210,6 +211,26 @@
                   {% else %}
                     <span class="status-pill status-submitted" style="font-size: 11px; padding: 3px 8px;">Submitted</span>
                   {% endif %}
+                </td>
+                <td>
+                  <div class="sla-badge-wrap">
+                    {% if c.sla_info.is_escalated %}
+                      <span class="sla-badge escalated" title="Overdue grievance escalated">Escalated</span>
+                    {% endif %}
+                    {% if c.status == 'Resolved' %}
+                      {% if c.sla_info.resolved_within_sla %}
+                        <span class="sla-badge resolved-within">Resolved within SLA</span>
+                      {% else %}
+                        <span class="sla-badge resolved-late">Resolved late</span>
+                      {% endif %}
+                    {% else %}
+                      {% if c.sla_info.is_overdue %}
+                        <span class="sla-badge overdue">{{ c.sla_info.badge_text }}</span>
+                      {% else %}
+                        <span class="sla-badge due">{{ c.sla_info.badge_text }}</span>
+                      {% endif %}
+                    {% endif %}
+                  </div>
                 </td>
                 <td class="cell-dept">
                   {{ c.department.name.replace('Tumakuru City Corporation - ', '') if c.department else 'Engineering Wing' }}

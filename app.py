@@ -158,6 +158,11 @@ class Complaint(db.Model):
     )
 
     @property
+    def sla_info(self):
+        """Dynamic SLA status computed on the fly from created_at and severity."""
+        return compute_complaint_sla(self)
+
+    @property
     def reasons_list(self):
         """Helper returning parsed list of severity reasons."""
         if not self.severity_reasons:
@@ -202,6 +207,16 @@ class Complaint(db.Model):
             "fix_note": self.fix_note,
             "department_id": self.department_id,
             "created_at": self.created_at.isoformat(),
+            "sla_info": {
+                "target_hours": self.sla_info["target_hours"],
+                "due_at": self.sla_info["due_at"].isoformat() if self.sla_info["due_at"] else None,
+                "is_resolved": self.sla_info["is_resolved"],
+                "resolved_within_sla": self.sla_info["resolved_within_sla"],
+                "is_overdue": self.sla_info["is_overdue"],
+                "is_escalated": self.sla_info["is_escalated"],
+                "badge_text": self.sla_info["badge_text"],
+                "badge_class": self.sla_info["badge_class"],
+            },
         }
 
 
@@ -226,6 +241,177 @@ class StatusHistory(db.Model):
             "status": self.status,
             "note": self.note,
             "changed_at": self.changed_at.isoformat(),
+        }
+
+
+# -----------------------------------------------------------------------------
+# SLA Targets & Dynamic On-the-fly Calculation
+# -----------------------------------------------------------------------------
+
+def get_sla_target_hours(severity):
+    """
+    SLA resolution targets by severity:
+    - Severity 5: 24 hours
+    - Severity 4: 48 hours
+    - Severity 3: 5 days (120 hours)
+    - Severity 1-2: 10 days (240 hours)
+    """
+    if severity == 5:
+        return 24
+    elif severity == 4:
+        return 48
+    elif severity == 3:
+        return 120
+    else:
+        return 240
+
+
+def compute_complaint_sla(complaint, now=None):
+    """
+    Computes due time, overdue status, countdown/overdue badge text, and escalation on the fly.
+    Returns:
+    {
+        "target_hours": int,
+        "due_at": datetime,
+        "is_resolved": bool,
+        "resolved_within_sla": bool or None,
+        "is_overdue": bool,
+        "is_escalated": bool,
+        "badge_text": str,   # "Due in 6h", "Overdue by 2d", "Resolved within SLA", "Resolved late"
+        "badge_class": str,  # "sla-due", "sla-overdue", "sla-resolved-within", "sla-resolved-late"
+    }
+    """
+    target_hours = get_sla_target_hours(complaint.severity)
+    created_at = complaint.created_at
+    if not created_at:
+        return {
+            "target_hours": target_hours,
+            "due_at": None,
+            "is_resolved": False,
+            "resolved_within_sla": None,
+            "is_overdue": False,
+            "is_escalated": False,
+            "badge_text": "N/A",
+            "badge_class": "sla-neutral",
+        }
+
+    target_delta = timedelta(hours=target_hours)
+    due_at = created_at + target_delta
+
+    if now is None:
+        if created_at.tzinfo is not None:
+            now = datetime.now(timezone.utc)
+        else:
+            now = datetime.utcnow()
+    else:
+        if created_at.tzinfo is not None and now.tzinfo is None:
+            now = now.replace(tzinfo=created_at.tzinfo)
+        elif created_at.tzinfo is None and now.tzinfo is not None:
+            now = now.replace(tzinfo=None)
+
+    is_resolved = (complaint.status == "Resolved")
+
+    if is_resolved:
+        # Find resolution timestamp from StatusHistory
+        res_time = None
+        if hasattr(complaint, "history") and complaint.history:
+            for h in complaint.history:
+                if h.status == "Resolved" and h.changed_at:
+                    res_time = h.changed_at
+                    break
+        if not res_time:
+            sh = (
+                StatusHistory.query.filter_by(complaint_id=complaint.id, status="Resolved")
+                .order_by(StatusHistory.changed_at.desc())
+                .first()
+            )
+            if sh and sh.changed_at:
+                res_time = sh.changed_at
+            else:
+                res_time = created_at
+
+        # Harmonize timezone
+        if res_time.tzinfo is not None and due_at.tzinfo is None:
+            res_time = res_time.replace(tzinfo=None)
+        elif res_time.tzinfo is None and due_at.tzinfo is not None:
+            res_time = res_time.replace(tzinfo=due_at.tzinfo)
+
+        within_sla = (res_time <= due_at)
+        if within_sla:
+            return {
+                "target_hours": target_hours,
+                "due_at": due_at,
+                "is_resolved": True,
+                "resolved_within_sla": True,
+                "is_overdue": False,
+                "is_escalated": False,
+                "badge_text": "Resolved within SLA",
+                "badge_class": "sla-resolved-within",
+            }
+        else:
+            return {
+                "target_hours": target_hours,
+                "due_at": due_at,
+                "is_resolved": True,
+                "resolved_within_sla": False,
+                "is_overdue": True,
+                "is_escalated": False,
+                "badge_text": "Resolved late",
+                "badge_class": "sla-resolved-late",
+            }
+
+    # Unresolved complaints
+    # Ensure comparable timezones between now and due_at
+    if due_at.tzinfo is not None and now.tzinfo is None:
+        now = now.replace(tzinfo=due_at.tzinfo)
+    elif due_at.tzinfo is None and now.tzinfo is not None:
+        now = now.replace(tzinfo=None)
+
+    if now <= due_at:
+        diff = due_at - now
+        total_sec = max(0.0, diff.total_seconds())
+        if total_sec < 3600:
+            mins = max(1, int(round(total_sec / 60.0)))
+            t_str = f"{mins}m"
+        elif total_sec < 86400:
+            hrs = max(1, int(round(total_sec / 3600.0)))
+            t_str = f"{hrs}h"
+        else:
+            days = max(1, int(round(total_sec / 86400.0)))
+            t_str = f"{days}d"
+
+        return {
+            "target_hours": target_hours,
+            "due_at": due_at,
+            "is_resolved": False,
+            "resolved_within_sla": None,
+            "is_overdue": False,
+            "is_escalated": False,
+            "badge_text": f"Due in {t_str}",
+            "badge_class": "sla-due",
+        }
+    else:
+        diff = now - due_at
+        total_sec = max(0.0, diff.total_seconds())
+        if total_sec < 3600:
+            mins = max(1, int(round(total_sec / 60.0)))
+            t_str = f"{mins}m"
+        elif total_sec < 86400:
+            hrs = max(1, int(round(total_sec / 3600.0)))
+            t_str = f"{hrs}h"
+        else:
+            days = max(1, int(round(total_sec / 86400.0)))
+            t_str = f"{days}d"
+
+        return {
+            "target_hours": target_hours,
+            "due_at": due_at,
+            "is_resolved": False,
+            "resolved_within_sla": None,
+            "is_overdue": True,
+            "is_escalated": True,
+            "badge_text": f"Overdue by {t_str}",
+            "badge_class": "sla-overdue",
         }
 
 
@@ -1200,18 +1386,28 @@ def dashboard():
     for dept in departments:
         dept_parents = [c for c in unique_complaints if c.department_id == dept.id]
         d_open = sum(1 for c in dept_parents if c.status != "Resolved")
-        d_resolved = sum(1 for c in dept_parents if c.status == "Resolved")
-        d_durations = [get_resolution_seconds(c) for c in dept_parents if c.status == "Resolved"]
+        d_resolved = [c for c in dept_parents if c.status == "Resolved"]
+        d_resolved_count = len(d_resolved)
+        d_durations = [get_resolution_seconds(c) for c in d_resolved]
         d_durations = [d for d in d_durations if d is not None]
         d_avg_sec = (sum(d_durations) / len(d_durations)) if d_durations else None
+
+        # % resolved within SLA
+        if d_resolved_count > 0:
+            within_count = sum(1 for c in d_resolved if c.sla_info.get("resolved_within_sla") is True)
+            pct = round((within_count / d_resolved_count) * 100)
+            sla_pct_str = f"{pct}%"
+        else:
+            sla_pct_str = "N/A"
 
         dept_stats.append({
             "id": dept.id,
             "name": dept.name,
             "category": dept.category,
             "open_count": d_open,
-            "resolved_count": d_resolved,
+            "resolved_count": d_resolved_count,
             "total_count": len(dept_parents),
+            "sla_percent": sla_pct_str,
             "avg_resolution_time": format_resolution_time(d_avg_sec),
         })
 

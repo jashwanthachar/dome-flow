@@ -95,6 +95,26 @@
             {% else %}
               <span class="status-pill status-submitted">{{ complaint.status }}</span>
             {% endif %}
+
+            <!-- SLA & Escalation Badges -->
+            <div class="sla-badge-wrap" style="margin-top: 8px;">
+              {% if complaint.sla_info.is_escalated %}
+                <span class="sla-badge escalated" title="Overdue grievance escalated">Escalated</span>
+              {% endif %}
+              {% if complaint.status == 'Resolved' %}
+                {% if complaint.sla_info.resolved_within_sla %}
+                  <span class="sla-badge resolved-within">Resolved within SLA</span>
+                {% else %}
+                  <span class="sla-badge resolved-late">Resolved late</span>
+                {% endif %}
+              {% else %}
+                {% if complaint.sla_info.is_overdue %}
+                  <span class="sla-badge overdue">{{ complaint.sla_info.badge_text }}</span>
+                {% else %}
+                  <span class="sla-badge due">{{ complaint.sla_info.badge_text }}</span>
+                {% endif %}
+              {% endif %}
+            </div>
           </div>
         </div>
       </div>
